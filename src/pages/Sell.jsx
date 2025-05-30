@@ -141,7 +141,7 @@ const SellTyre = () => {
   };
 
   const handleCompanyChange = (e) => {
-    const company = e.target.value.trim();
+    const company = e.target.value ;
     setForm((prev) => ({
       ...prev,
       company,
@@ -175,7 +175,7 @@ const SellTyre = () => {
   };
 
   const handleBrandChange = (e) => {
-    const brand = e.target.value.trim();
+    const brand = e.target.value ;
     setForm((prev) => ({
       ...prev,
       brand,
@@ -210,7 +210,7 @@ const SellTyre = () => {
   };
 
   const handleModelChange = (e) => {
-    const model = e.target.value.trim();
+    const model = e.target.value ;
     setForm((prev) => ({
       ...prev,
       model,
@@ -248,10 +248,10 @@ const SellTyre = () => {
           const querySize = updatedForm.size || firstMatch.size || "";
           const purchasedQuery = query(
             collection(db, "purchasedTyres"),
-            where("company", "==", updatedForm.company.trim()),
-            where("brand", "==", updatedForm.brand.trim()),
-            where("model", "==", model.trim()),
-            where("size", "==", querySize.trim())
+            where("company", "==", updatedForm.company ),
+            where("brand", "==", updatedForm.brand ),
+            where("model", "==", model ),
+            where("size", "==", querySize )
           );
           try {
             const purchasedSnapshot = await getDocs(purchasedQuery);
@@ -276,7 +276,7 @@ const SellTyre = () => {
   };
 
   const handleSizeChange = (e) => {
-    const size = e.target.value.trim();
+    const size = e.target.value ;
     const match = itemTyres.find(
       (t) =>
         t.company?.toLowerCase() === form.company.toLowerCase() &&
@@ -297,10 +297,10 @@ const SellTyre = () => {
       const fetchShopQuantity = async () => {
         const purchasedQuery = query(
           collection(db, "purchasedTyres"),
-          where("company", "==", form.company.trim()),
-          where("brand", "==", form.brand.trim()),
-          where("model", "==", form.model.trim()),
-          where("size", "==", size.trim())
+          where("company", "==", form.company ),
+          where("brand", "==", form.brand ),
+          where("model", "==", form.model ),
+          where("size", "==", size )
         );
         try {
           const purchasedSnapshot = await getDocs(purchasedQuery);
@@ -370,10 +370,10 @@ const SellTyre = () => {
       // Fetch purchasedTyres to update shop quantity
       const purchasedQuery = query(
         collection(db, "purchasedTyres"),
-        where("company", "==", form.company.trim()),
-        where("brand", "==", form.brand.trim()),
-        where("model", "==", form.model.trim()),
-        where("size", "==", form.size.trim())
+        where("company", "==", form.company ),
+        where("brand", "==", form.brand ),
+        where("model", "==", form.model ),
+        where("size", "==", form.size )
       );
       try {
         const purchasedSnapshot = await getDocs(purchasedQuery);
