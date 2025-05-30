@@ -71,18 +71,11 @@ const SellTyre = () => {
   useEffect(() => {
     const unsubSell = onSnapshot(collection(db, "soldTyres"), (snapshot) => {
       let data = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data(), createdAt: doc.data().createdAt?.toDate?.() || new Date(0), }));
-      // Sort by createdAt in descending order (newest first)
       data = data.sort((a, b) => {
         const dateA = a.createdAt ? new Date(a.createdAt) : new Date(0);
         const dateB = b.createdAt ? new Date(b.createdAt) : new Date(0);
         return dateB - dateA;
       });
-
-      // Sort by createdAt in descending order (newest first)
-      data = data.sort((a, b) => b.createdAt - a.createdAt);
-
-
-      // Apply date range filter after sorting
       data = filterByDateRange(data, startDate, endDate);
       setSellTyres(data);
     });
@@ -91,7 +84,7 @@ const SellTyre = () => {
       const snapshot = await getDocs(collection(db, "addItemTyres"));
       const data = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
       setItemTyres(data);
-      setAvailableCompanies([...new Set(data.map((t) => t.company?.toLowerCase()))]);
+      setAvailableCompanies([...new Set(data.map((t) => t.company?.trim().toLowerCase()))]);
     };
 
     fetchItemTyres();
@@ -127,7 +120,6 @@ const SellTyre = () => {
     const newForm = { ...form, [name]: value };
     setForm(newForm);
 
-    // Recalculate totalPrice dynamically for price, quantity, discount, or due
     const price = parseFloat(newForm.price) || 0;
     const quantity = parseInt(newForm.quantity) || 0;
     const discount = parseFloat(newForm.discount) || 0;
@@ -141,10 +133,10 @@ const SellTyre = () => {
   };
 
   const handleCompanyChange = (e) => {
-    const company = e.target.value.trim();
+    const company = e.target.value.trim().toLowerCase();
     setForm((prev) => ({
       ...prev,
-      company,
+      company: e.target.value, // Preserve original input for display
       brand: "",
       model: "",
       size: "",
@@ -158,8 +150,8 @@ const SellTyre = () => {
     }));
 
     const brands = itemTyres
-      .filter((t) => t.company?.toLowerCase() === company.toLowerCase())
-      .map((t) => t.brand);
+      .filter((t) => t.company?.trim().toLowerCase() === company)
+      .map((t) => t.brand?.trim().toLowerCase());
 
     if (brands.length === 0 && company) {
       toast.error("❌ This company is not available in AddItem");
@@ -175,10 +167,10 @@ const SellTyre = () => {
   };
 
   const handleBrandChange = (e) => {
-    const brand = e.target.value.trim();
+    const brand = e.target.value.trim().toLowerCase();
     setForm((prev) => ({
       ...prev,
-      brand,
+      brand: e.target.value, // Preserve original input for display
       model: "",
       size: "",
       price: "",
@@ -193,10 +185,10 @@ const SellTyre = () => {
     const models = itemTyres
       .filter(
         (t) =>
-          t.company?.toLowerCase() === form.company.toLowerCase() &&
-          t.brand?.toLowerCase() === brand.toLowerCase()
+          t.company?.trim().toLowerCase() === form.company.trim().toLowerCase() &&
+          t.brand?.trim().toLowerCase() === brand
       )
-      .map((t) => t.model);
+      .map((t) => t.model?.trim().toLowerCase());
 
     if (models.length === 0 && brand) {
       toast.error("❌ This brand is not available for selected company");
@@ -210,10 +202,10 @@ const SellTyre = () => {
   };
 
   const handleModelChange = (e) => {
-    const model = e.target.value.trim();
+    const model = e.target.value.trim().toLowerCase();
     setForm((prev) => ({
       ...prev,
-      model,
+      model: e.target.value, // Preserve original input for display
       size: "",
       price: "",
       quantity: prev.quantity || "",
@@ -226,13 +218,13 @@ const SellTyre = () => {
 
     const matches = itemTyres.filter(
       (t) =>
-        t.company?.toLowerCase() === form.company.toLowerCase() &&
-        t.brand?.toLowerCase() === form.brand.toLowerCase() &&
-        t.model?.toLowerCase() === model.toLowerCase()
+        t.company?.trim().toLowerCase() === form.company.trim().toLowerCase() &&
+        t.brand?.trim().toLowerCase() === form.brand.trim().toLowerCase() &&
+        t.model?.trim().toLowerCase() === model
     );
 
     if (matches.length > 0) {
-      const uniqueSizes = [...new Set(matches.map((t) => t.size))];
+      const uniqueSizes = [...new Set(matches.map((t) => t.size?.trim().toLowerCase()))];
       const firstMatch = matches[0];
 
       setAvailableSizes(uniqueSizes);
@@ -243,15 +235,14 @@ const SellTyre = () => {
           price: firstMatch.price || "",
         };
 
-        // Fetch shopQuantity from purchasedTyres with updated form values
         const fetchShopQuantity = async () => {
-          const querySize = updatedForm.size || firstMatch.size || "";
+          const querySize = updatedForm.size?.trim().toLowerCase() || firstMatch.size?.trim().toLowerCase() || "";
           const purchasedQuery = query(
             collection(db, "purchasedTyres"),
             where("company", "==", updatedForm.company.trim()),
             where("brand", "==", updatedForm.brand.trim()),
-            where("model", "==", model.trim()),
-            where("size", "==", querySize.trim())
+            where("model", "==", e.target.value.trim()), // Use original input for query
+            where("size", "==", querySize)
           );
           try {
             const purchasedSnapshot = await getDocs(purchasedQuery);
@@ -276,31 +267,30 @@ const SellTyre = () => {
   };
 
   const handleSizeChange = (e) => {
-    const size = e.target.value.trim();
+    const size = e.target.value.trim().toLowerCase();
     const match = itemTyres.find(
       (t) =>
-        t.company?.toLowerCase() === form.company.toLowerCase() &&
-        t.brand?.toLowerCase() === form.brand.toLowerCase() &&
-        t.model?.toLowerCase() === form.model.toLowerCase() &&
-        t.size === size
+        t.company?.trim().toLowerCase() === form.company.trim().toLowerCase() &&
+        t.brand?.trim().toLowerCase() === form.brand.trim().toLowerCase() &&
+        t.model?.trim().toLowerCase() === form.model.trim().toLowerCase() &&
+        t.size?.trim().toLowerCase() === size
     );
 
     if (match) {
       setForm((prev) => ({
         ...prev,
-        size,
+        size: e.target.value, // Preserve original input for display
         price: match.price || "",
         comment: prev.comment || "",
       }));
 
-      // Fetch shopQuantity from purchasedTyres
       const fetchShopQuantity = async () => {
         const purchasedQuery = query(
           collection(db, "purchasedTyres"),
           where("company", "==", form.company.trim()),
           where("brand", "==", form.brand.trim()),
           where("model", "==", form.model.trim()),
-          where("size", "==", size.trim())
+          where("size", "==", e.target.value.trim())
         );
         try {
           const purchasedSnapshot = await getDocs(purchasedQuery);
@@ -317,7 +307,7 @@ const SellTyre = () => {
       };
       fetchShopQuantity();
     } else {
-      setForm((prev) => ({ ...prev, size, shopQuantity: "", comment: prev.comment || "" }));
+      setForm((prev) => ({ ...prev, size: e.target.value, shopQuantity: "", comment: prev.comment || "" }));
     }
   };
 
@@ -333,7 +323,6 @@ const SellTyre = () => {
       return;
     }
 
-    // Skip quantity checks during edit
     if (!editId) {
       const shopQty = parseInt(form.shopQuantity) || 0;
       if (enteredQty > shopQty) {
@@ -343,20 +332,20 @@ const SellTyre = () => {
 
       const matchedItems = itemTyres.filter(
         (t) =>
-          t.company?.toLowerCase() === form.company.toLowerCase() &&
-          t.brand?.toLowerCase() === form.brand.toLowerCase() &&
-          t.model?.toLowerCase() === form.model.toLowerCase() &&
-          t.size === form.size
+          t.company?.trim().toLowerCase() === form.company.trim().toLowerCase() &&
+          t.brand?.trim().toLowerCase() === form.brand.trim().toLowerCase() &&
+          t.model?.trim().toLowerCase() === form.model.trim().toLowerCase() &&
+          t.size?.trim().toLowerCase() === form.size.trim().toLowerCase()
       );
 
       const totalPurchasedQty = matchedItems.reduce((acc, curr) => acc + parseInt(curr.quantity || 0), 0);
 
       const matchedSold = sellTyres.filter(
         (t) =>
-          t.company?.toLowerCase() === form.company.toLowerCase() &&
-          t.brand?.toLowerCase() === form.brand.toLowerCase() &&
-          t.model?.toLowerCase() === form.model.toLowerCase() &&
-          t.size === form.size
+          t.company?.trim().toLowerCase() === form.company.trim().toLowerCase() &&
+          t.brand?.trim().toLowerCase() === form.brand.trim().toLowerCase() &&
+          t.model?.trim().toLowerCase() === form.model.trim().toLowerCase() &&
+          t.size?.trim().toLowerCase() === form.size.trim().toLowerCase()
       );
 
       const totalSoldQty = matchedSold.reduce((acc, curr) => acc + parseInt(curr.quantity || 0), 0);
@@ -367,7 +356,6 @@ const SellTyre = () => {
         return;
       }
 
-      // Fetch purchasedTyres to update shop quantity
       const purchasedQuery = query(
         collection(db, "purchasedTyres"),
         where("company", "==", form.company.trim()),
@@ -382,7 +370,6 @@ const SellTyre = () => {
           ...doc.data(),
         }));
 
-        // Update shop quantity
         let remainingQty = enteredQty;
         for (const tyre of purchasedTyres) {
           if (remainingQty <= 0) break;
@@ -426,7 +413,7 @@ const SellTyre = () => {
       price: discountedPrice,
       quantity: enteredQty,
       status: "Sold",
-      createdAt: editId ? form.createdAt || new Date() : new Date(), // Preserve createdAt on edit, set new on add
+      createdAt: editId ? form.createdAt || new Date() : new Date(),
       discount,
       due,
       payableAmount,
@@ -472,7 +459,6 @@ const SellTyre = () => {
   };
 
   const handleSellTyre = () => {
-    // Show the confirmation popup instead of directly selling
     setShowConfirmPopup(true);
   };
 
@@ -502,7 +488,6 @@ const SellTyre = () => {
     <div className="max-w-8xl mx-auto p-6">
       <h2 className="text-3xl font-bold text-gray-800 mb-6">🛒 Sell Item</h2>
 
-      {/* Form */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
         <input
           type="text"
@@ -630,7 +615,6 @@ const SellTyre = () => {
         {editId ? "Update Tyre" : "Sell Tyre"}
       </button>
 
-      {/* Confirmation Popup */}
       {showConfirmPopup && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center z-50 p-4">
           <div className="bg-white rounded-lg shadow-lg max-w-md w-full p-6">
@@ -659,7 +643,6 @@ const SellTyre = () => {
         </div>
       )}
 
-      {/* Search */}
       <div className="mt-10 flex justify-between items-center">
         <input
           type="text"
@@ -701,7 +684,6 @@ const SellTyre = () => {
         </div>
       </div>
 
-      {/* Table */}
       <div className="overflow-x-auto">
         <table className="w-full text-sm text-left border-collapse bg-white rounded shadow overflow-hidden">
           <thead className="bg-gray-100 text-gray-700">
@@ -759,7 +741,7 @@ const SellTyre = () => {
                           due: tyre.due || "",
                           shopQuantity: "",
                           comment: tyre.comment || "",
-                          createdAt: tyre.createdAt || new Date(), // Preserve createdAt for editing
+                          createdAt: tyre.createdAt || new Date(),
                         });
                         setEditId(tyre.id);
                         setCustomerName(tyre.customerName || '');
@@ -826,7 +808,7 @@ const SellTyre = () => {
               background: white !important;
             }
             .invoice-header {
-              background: #2563eb !important; /* Fallback for gradient */
+              background: #2563eb !important;
               padding: 16mm !important;
               margin-bottom: 8mm !important;
               border-radius: 8mm 8mm 0 0 !important;
@@ -864,9 +846,7 @@ const SellTyre = () => {
         `}
             </style>
 
-            {/* Main Invoice Container */}
             <div className="invoice-container">
-              {/* Header */}
               <div className="invoice-header bg-gradient-to-r from-blue-600 to-blue-800 text-white p-6 rounded-t-2xl flex justify-between items-center">
                 <h2 className="text-3xl font-bold print:text-2xl text-center">Srhad Tyres Treaders</h2>
                 <div className="text-sm print:text-xs">
@@ -874,7 +854,6 @@ const SellTyre = () => {
                 </div>
               </div>
 
-              {/* Invoice Details */}
               <div className="invoice-section mb-6">
                 <div className="invoice-grid grid grid-cols-1 md:grid-cols-2 gap-8 text-gray-700">
                   <div>
@@ -890,7 +869,6 @@ const SellTyre = () => {
                 </div>
               </div>
 
-              {/* Pricing Summary */}
               <div className="invoice-section mb-6">
                 <h3 className="text-lg font-semibold text-gray-800 border-b border-gray-200 pb-2 mb-4">Pricing Summary</h3>
                 <div className="invoice-grid grid grid-cols-2 gap-x-6 gap-y-3 text-gray-700">
@@ -907,12 +885,10 @@ const SellTyre = () => {
                 </div>
               </div>
 
-              {/* Note */}
               <div className="invoice-note text-center mb-6">
                 <p className="text-sm text-gray-500">Note: We provide a wide range of imported tires and rims for all types of vehicles.</p>
               </div>
 
-              {/* Buttons (Hidden on Print) */}
               <div className="print-hidden flex justify-between items-center text-gray-600 text-sm mt-6">
                 <p>Status: <span className="font-semibold text-green-600">Sold</span></p>
                 <div className="flex gap-3">
