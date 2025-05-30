@@ -166,7 +166,7 @@ const CustomerLedger = () => {
         totalItems: entry.totalItems,
         totalCost: entry.totalCost,
         sizes: entry.size,
-        date: Array.from(entry.dates).sort().join(', ') || 'N/A',
+        date: Array.from(entry.dates).sort((a, b) => new Date(b) - new Date(a)).join(', ') || 'N/A',
       }))
       .filter(entry => {
         const query = saleSearchQuery.toLowerCase();
@@ -174,7 +174,8 @@ const CustomerLedger = () => {
           entry.brand.toLowerCase().includes(query) ||
           entry.sizes.toLowerCase().includes(query)
         );
-      });
+      })
+      .sort((a, b) => new Date(b.date.split(',')[0]) - new Date(a.date.split(',')[0]));
 
     const indexOfLastRow = currentPage * rowsPerPage;
     const indexOfFirstRow = indexOfLastRow - rowsPerPage;
@@ -225,7 +226,7 @@ const CustomerLedger = () => {
         }
         return true;
       })
-      .sort((a, b) => new Date(a.date) - new Date(b.date))
+      .sort((a, b) => new Date(b.date) - new Date(a.date))
       .map(entry => ({
         ...entry,
         balance: fixedBalance.toFixed(2),

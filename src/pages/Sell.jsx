@@ -70,13 +70,18 @@ const SellTyre = () => {
 
   useEffect(() => {
     const unsubSell = onSnapshot(collection(db, "soldTyres"), (snapshot) => {
-      let data = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+      let data = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data(), createdAt: doc.data().createdAt?.toDate?.() || new Date(0), }));
       // Sort by createdAt in descending order (newest first)
       data = data.sort((a, b) => {
         const dateA = a.createdAt ? new Date(a.createdAt) : new Date(0);
         const dateB = b.createdAt ? new Date(b.createdAt) : new Date(0);
         return dateB - dateA;
       });
+
+      // Sort by createdAt in descending order (newest first)
+      data = data.sort((a, b) => b.createdAt - a.createdAt);
+
+
       // Apply date range filter after sorting
       data = filterByDateRange(data, startDate, endDate);
       setSellTyres(data);

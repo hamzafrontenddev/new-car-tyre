@@ -160,7 +160,7 @@ const CompanyLeaders = () => {
           due: parseFloat(details.due) || 0,
           totalReturn: parseFloat(details.totalReturn) || 0,
           sizes: entry.size,
-          date: Array.from(entry.dates).sort().join(', ') || 'N/A',
+          date: Array.from(entry.dates).sort((a, b) => new Date(b) - new Date(a)).join(', ') || 'N/A',
         };
       })
       .filter(entry => {
@@ -169,7 +169,8 @@ const CompanyLeaders = () => {
           entry.brand.toLowerCase().includes(query) ||
           entry.sizes.toLowerCase().includes(query)
         );
-      });
+      })
+      .sort((a, b) => new Date(b.date.split(',')[0]) - new Date(a.date.split(',')[0]));
 
     const indexOfLastRow = currentPage * rowsPerPage;
     const indexOfFirstRow = indexOfLastRow - rowsPerPage;
@@ -220,7 +221,7 @@ const CompanyLeaders = () => {
         }
         return true;
       })
-      .sort((a, b) => new Date(a.date) - new Date(b.date))
+      .sort((a, b) => new Date(b.date) - new Date(a.date))
       .map(entry => ({
         ...entry,
         balance: fixedBalance.toFixed(2),
