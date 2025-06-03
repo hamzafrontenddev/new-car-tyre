@@ -262,7 +262,7 @@ const Dashboard = () => {
         <StatCard title="Total Shop Quantity" value={totalShop} icon={<CubeIcon className="w-8 h-8 text-purple-600" />} />
         <StatCard title="Total Buy Cost" value={`Rs. ${totalBuyCost.toLocaleString()}`} icon={<FaRupeeSign className="w-8 h-8 text-purple-600" />} />
         <StatCard title="Total Sales" value={`Rs. ${adjustedTotalSales.toLocaleString()}`} icon={<ChartBarIcon className="w-8 h-8 text-teal-600" />} />
-        <StatCard title="Profit" value={`Rs. ${profit.toLocaleString()}`} icon={<BanknotesIcon className="w-8 h-8 text-green-600" />} />
+        {/* <StatCard title="Profit" value={`Rs. ${profit.toLocaleString()}`} icon={<BanknotesIcon className="w-8 h-8 text-green-600" />} /> */}
       </div>
 
       <div className="flex flex-wrap items-center gap-4 mb-4">

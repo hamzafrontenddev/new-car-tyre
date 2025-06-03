@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { collection, addDoc, onSnapshot, doc, updateDoc, deleteDoc } from "firebase/firestore";
+import { collection, addDoc, onSnapshot, doc, updateDoc, deleteDoc, getDocs, where, query } from "firebase/firestore";
 import { db } from "../firebase";
 import { toast } from "react-toastify";
 import DatePicker from "react-datepicker";
@@ -31,21 +31,42 @@ const BuyTyre = () => {
   const [startDate, setStartDate] = useState(null);
   const [endDate, setEndDate] = useState(null);
   const [selectedTyre, setSelectedTyre] = useState(null);
+  const [companies, setCompanies] = useState([]);
+  const [brands, setBrands] = useState([]);
+  const [models, setModels] = useState([]);
+  const [sizes, setSizes] = useState([]);
   const itemsPerPage = 5;
 
+  // Fetch tyres, companies, and suggestions from Firestore
   useEffect(() => {
-    const unsub = onSnapshot(collection(db, "purchasedTyres"), (snapshot) => {
+    // Fetch purchased tyres
+    const unsubTyres = onSnapshot(collection(db, "purchasedTyres"), (snapshot) => {
       let data = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
       data = filterByDateRange(data, startDate, endDate);
       // Sort by date in descending order (latest first)
       data.sort((a, b) => {
         const dateA = a.date ? new Date(a.date).getTime() : 0;
-        const dateB = b.date ? new Date(b.date).getTime() : 0;
+        const dateB = b.date ? new Date(a.date).getTime() : 0;
         return dateB - dateA;
       });
       setTyres(data);
+
+      // Populate suggestions for brand, model, and size
+      setBrands([...new Set(data.map((item) => item.brand))]);
+      setModels([...new Set(data.map((item) => item.model))]);
+      setSizes([...new Set(data.map((item) => item.size))]);
     });
-    return () => unsub();
+
+    // Fetch companies from users collection
+    const fetchCompanies = async () => {
+      const q = query(collection(db, "users"), where("userType", "==", "Company"));
+      const snapshot = await getDocs(q);
+      const companyData = snapshot.docs.map((doc) => doc.data().name);
+      setCompanies([...new Set(companyData)]);
+    };
+    fetchCompanies();
+
+    return () => unsubTyres();
   }, [startDate, endDate]);
 
   const handleSubmit = async (e) => {
@@ -144,34 +165,66 @@ const BuyTyre = () => {
     <div className="p-6 max-w-7xl mx-auto">
       <h2 className="text-xl font-semibold mb-4">🛒 Buy Tyre</h2>
       <form className="grid grid-cols-3 gap-4 mb-6" onSubmit={handleSubmit}>
-        <input
-          type="text"
-          placeholder="Party"
-          value={company}
-          onChange={(e) => setCompany(e.target.value)}
-          className="border border-gray-300 rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-400"
-        />
-        <input
-          type="text"
-          placeholder="Brand"
-          value={brand}
-          onChange={(e) => setBrand(e.target.value)}
-          className="border border-gray-300 rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-400"
-        />
-        <input
-          type="text"
-          placeholder="Model"
-          value={model}
-          onChange={(e) => setModel(e.target.value)}
-          className="border border-gray-300 rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-400"
-        />
-        <input
-          type="text"
-          placeholder="Size"
-          value={size}
-          onChange={(e) => setSize(e.target.value)}
-          className="border border-gray-300 rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-400"
-        />
+        <div className="relative">
+          <input
+            type="text"
+            placeholder="Select Party"
+            value={company}
+            onChange={(e) => setCompany(e.target.value)}
+            list="companySuggestions"
+            className="border border-gray-300 rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-400 w-full"
+          />
+          <datalist id="companySuggestions">
+            {companies.map((companyName, idx) => (
+              <option key={idx} value={companyName} />
+            ))}
+          </datalist>
+        </div>
+        <div className="relative">
+          <input
+            type="text"
+            placeholder="Brand"
+            value={brand}
+            onChange={(e) => setBrand(e.target.value)}
+            list="brandSuggestions"
+            className="border border-gray-300 rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-400 w-full"
+          />
+          <datalist id="brandSuggestions">
+            {brands.map((brandOption, idx) => (
+              <option key={idx} value={brandOption} />
+            ))}
+          </datalist>
+        </div>
+        <div className="relative">
+          <input
+            type="text"
+            placeholder="Model"
+            value={model}
+            onChange={(e) => setModel(e.target.value)}
+            list="modelSuggestions"
+            className="border border-gray-300 rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-400 w-full"
+          />
+          <datalist id="modelSuggestions">
+            {models.map((modelOption, idx) => (
+              <option key={idx} value={modelOption} />
+            ))}
+          </datalist>
+        </div>
+        <div className="relative">
+          <input
+            type="text"
+            placeholder="Size"
+            value={size}
+            onChange={(e) => setSize(e.target.value)}
+            list="sizeSuggestions"
+            className="border border-gray-300 rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-400 w-full"
+          />
+          <datalist id="sizeSuggestions">
+            {sizes.map((sizeOption, idx) => (
+              <option key={idx} value={sizeOption} />
+            ))}
+          </datalist>
+        </div>
         <input
           type="number"
           placeholder="Price"
@@ -321,7 +374,9 @@ const BuyTyre = () => {
             className="bg-white rounded-xl shadow-2xl max-w-3xl w-full p-8 relative font-sans print:bg-white print:p-0 print:shadow-none"
             id="printable"
           >
-            <header className="flex justify-between items-center border-b border-gray-200 pb-4 mb-6">
+            <header className="flex justify-between items-center border-b border-gray-200 pb-4
+
+ mb-6">
               <h2 className="text-3xl font-extrabold text-gray-900 flex items-center gap-2">
                 <span role="img" aria-label="Invoice">🧾</span> Purchase Invoice
               </h2>

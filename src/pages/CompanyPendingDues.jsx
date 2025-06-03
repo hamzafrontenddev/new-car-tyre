@@ -15,8 +15,8 @@ const filterByDateRange = (data, start, end) => {
   });
 };
 
-const PendingDues = () => {
-  const [pendingCustomers, setPendingCustomers] = useState([]);
+const CompanyPendingDues = () => {
+  const [pendingCompanies, setPendingCompanies] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const [startDate, setStartDate] = useState(null);
@@ -29,39 +29,39 @@ const PendingDues = () => {
     const unsubscribeUsers = onSnapshot(collection(db, 'users'), (snapshot) => {
       usersMap = snapshot.docs.reduce((map, doc) => {
         const data = doc.data();
-        if (data.userType === 'Customer') {
+        if (data.userType === 'Company') {
           map[data.name] = data.mobile;
         }
         return map;
       }, {});
       
-      // Fetch customerDetails with due > 0
-      const unsubscribeCustomers = onSnapshot(collection(db, 'customerDetails'), (snapshot) => {
+      // Fetch companyDetails with due > 0
+      const unsubscribeCompanies = onSnapshot(collection(db, 'companyDetails'), (snapshot) => {
         let data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))
           .filter(item => parseFloat(item.due || 0) > 0);
         // Enrich data with phone numbers
         data = data.map(item => ({
           ...item,
-          phone: usersMap[item.customerName] || 'N/A'
+          phone: usersMap[item.companyName] || 'N/A'
         }));
         // Apply date range filter
         data = filterByDateRange(data, startDate, endDate);
-        setPendingCustomers(data);
+        setPendingCompanies(data);
       });
 
-      return () => unsubscribeCustomers();
+      return () => unsubscribeCompanies();
     });
 
     return () => unsubscribeUsers();
   }, [startDate, endDate]);
 
-  const filteredCustomers = pendingCustomers.filter((customer) =>
+  const filteredCompanies = pendingCompanies.filter((company) =>
     Object.values({
-      customerName: customer.customerName,
-      phone: customer.phone,
-      totalCost: customer.totalCost,
-      totalPaid: customer.totalPaid,
-      due: customer.due
+      companyName: company.companyName,
+      phone: company.phone,
+      totalCost: company.totalCost,
+      totalPaid: company.totalPaid,
+      due: company.due
     }).some((val) =>
       String(val).toLowerCase().includes(searchTerm.toLowerCase())
     )
@@ -69,22 +69,22 @@ const PendingDues = () => {
 
   const indexOfLastItem = currentPage * itemsPerPage;
   const indexOfFirstItem = indexOfLastItem - itemsPerPage;
-  const currentItems = filteredCustomers.slice(indexOfFirstItem, indexOfLastItem);
-  const totalPages = Math.ceil(filteredCustomers.length / itemsPerPage);
+  const currentItems = filteredCompanies.slice(indexOfFirstItem, indexOfLastItem);
+  const totalPages = Math.ceil(filteredCompanies.length / itemsPerPage);
 
   const paginate = (pageNumber) => setCurrentPage(pageNumber);
 
   return (
     <div className="max-w-8xl mx-auto p-6 bg-gradient-to-b from-gray-50 to-gray-100 min-h-screen">
-      <h2 className="text-3xl font-bold mb-6 bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">
-        Customer Pending Dues
+      <h2 className="text-3xl font-bold text-gray-800 mb-6 bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">
+        Company Pending Dues
       </h2>
 
       {/* Search and Date Filter */}
       <div className="flex flex-col sm:flex-row justify-between items-center gap-4 mb-6">
         <input
           type="text"
-          placeholder="🔍 Search by customer, phone, cost, paid, due..."
+          placeholder="🔍 Search by company, phone, cost, paid, due..."
           value={searchTerm}
           onChange={(e) => {
             setSearchTerm(e.target.value);
@@ -130,7 +130,7 @@ const PendingDues = () => {
         <table className="min-w-full border-collapse text-sm text-left bg-white rounded-xl shadow-sm">
           <thead>
             <tr className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white">
-              <th className="py-3 px-6 font-semibold">Customer Name</th>
+              <th className="py-3 px-6 font-semibold">Company Name</th>
               <th className="py-3 px-6 font-semibold">Phone Number</th>
               <th className="py-3 px-6 font-semibold">Total Cost</th>
               <th className="py-3 px-6 font-semibold">Total Paid</th>
@@ -140,20 +140,20 @@ const PendingDues = () => {
           </thead>
           <tbody>
             {currentItems.length > 0 ? (
-              currentItems.map((customer) => (
-                <tr key={customer.id} className="border-b border-gray-200 hover:bg-gray-50 transition duration-200">
-                  <td className="py-3 px-6">{customer.customerName}</td>
-                  <td className="py-3 px-6">{customer.phone}</td>
+              currentItems.map((company) => (
+                <tr key={company.id} className="border-b border-gray-200 hover:bg-gray-50 transition duration-200">
+                  <td className="py-3 px-6">{company.companyName}</td>
+                  <td className="py-3 px-6">{company.phone}</td>
                   <td className="py-3 px-6 text-blue-700 font-semibold">
-                    Rs. {(parseFloat(customer.totalCost) || 0).toLocaleString()}
+                    Rs. {(parseFloat(company.totalCost) || 0).toLocaleString()}
                   </td>
                   <td className="py-3 px-6 text-green-700 font-semibold">
-                    Rs. {(parseFloat(customer.totalPaid) || 0).toLocaleString()}
+                    Rs. {(parseFloat(company.totalPaid) || 0).toLocaleString()}
                   </td>
                   <td className="py-3 px-6 text-red-600 font-semibold">
-                    Rs. {(parseFloat(customer.due) || 0).toLocaleString()}
+                    Rs. {(parseFloat(company.due) || 0).toLocaleString()}
                   </td>
-                  <td className="py-3 px-6">{customer.date}</td>
+                  <td className="py-3 px-6">{company.date}</td>
                 </tr>
               ))
             ) : (
@@ -198,4 +198,4 @@ const PendingDues = () => {
   );
 };
 
-export default PendingDues;
+export default CompanyPendingDues;

@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { ToastContainer } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
 
+import AddUser from "./pages/AddUser";
 import BuyTyre from "./pages/BuyTyre";
 import Inventory from "./pages/Inventory";
 import Sell from "./pages/Sell";
@@ -14,6 +15,7 @@ import Transfer from "./pages/Transfer";
 import PendingDues from "./pages/PendingDues";
 import CustomerLedger from "./pages/CustomerLedger";
 import Login from "./components/Login";
+import CompanyPendingDues from "./pages/CompanyPendingDues";
 
 // PrivateRoute component to protect routes
 const PrivateRoute = ({ children }) => {
@@ -64,8 +66,7 @@ const Navigation = ({ toggleSidebar }) => {
             to="/"
             end
             className={({ isActive }) =>
-              `font-semibold transition duration-200 ${
-                isActive ? "text-blue-600 border-b-2 border-blue-600" : "text-gray-600 hover:text-blue-500"
+              `font-semibold transition duration-200 ${isActive ? "text-blue-600 border-b-2 border-blue-600" : "text-gray-600 hover:text-blue-500"
               }`
             }
           >
@@ -74,8 +75,7 @@ const Navigation = ({ toggleSidebar }) => {
           <NavLink
             to="/sell"
             className={({ isActive }) =>
-              `font-semibold transition duration-200 ${
-                isActive ? "text-blue-600 border-b-2 border-blue-600" : "text-gray-600 hover:text-blue-500"
+              `font-semibold transition duration-200 ${isActive ? "text-blue-600 border-b-2 border-blue-600" : "text-gray-600 hover:text-blue-500"
               }`
             }
           >
@@ -84,8 +84,7 @@ const Navigation = ({ toggleSidebar }) => {
           <NavLink
             to="/return"
             className={({ isActive }) =>
-              `font-semibold transition duration-200 ${
-                isActive ? "text-blue-600 border-b-2 border-blue-600" : "text-gray-600 hover:text-blue-500"
+              `font-semibold transition duration-200 ${isActive ? "text-blue-600 border-b-2 border-blue-600" : "text-gray-600 hover:text-blue-500"
               }`
             }
           >
@@ -94,12 +93,11 @@ const Navigation = ({ toggleSidebar }) => {
           <NavLink
             to="/pending-dues"
             className={({ isActive }) =>
-              `font-semibold transition duration-200 ${
-                isActive ? "text-blue-600 border-b-2 border-blue-600" : "text-gray-600 hover:text-blue-500"
+              `font-semibold transition duration-200 ${isActive ? "text-blue-600 border-b-2 border-blue-600" : "text-gray-600 hover:text-blue-500"
               }`
             }
           >
-            Pending Dues
+            Customer Pending Dues
           </NavLink>
         </div>
       </div>
@@ -121,9 +119,8 @@ const Sidebar = ({ isOpen, toggleSidebar }) => {
 
   return (
     <div
-      className={`bg-white shadow-md w-64 h-screen fixed top-0 left-0 z-20 transform ${
-        isOpen ? "translate-x-0" : "-translate-x-full"
-      } transition-transform duration-300 ease-in-out`}
+      className={`bg-white shadow-md w-64 h-screen fixed top-0 left-0 z-20 transform ${isOpen ? "translate-x-0" : "-translate-x-full"
+        } transition-transform duration-300 ease-in-out`}
     >
       <div className="flex flex-col p-4 h-full">
         <div className="flex justify-between items-center mb-4">
@@ -139,10 +136,19 @@ const Sidebar = ({ isOpen, toggleSidebar }) => {
         </div>
         <div className="flex flex-col gap-4 flex-grow">
           <NavLink
+            to="/add-user"
+            className={({ isActive }) =>
+              `font-semibold transition duration-200 px-4 py-2 rounded ${isActive ? "bg-blue-600 text-white" : "text-gray-600 hover:bg-blue-100 hover:text-blue-500"
+              }`
+            }
+            onClick={toggleSidebar}
+          >
+            Add User
+          </NavLink>
+          <NavLink
             to="/buy"
             className={({ isActive }) =>
-              `font-semibold transition duration-200 px-4 py-2 rounded ${
-                isActive ? "bg-blue-600 text-white" : "text-gray-600 hover:bg-blue-100 hover:text-blue-500"
+              `font-semibold transition duration-200 px-4 py-2 rounded ${isActive ? "bg-blue-600 text-white" : "text-gray-600 hover:bg-blue-100 hover:text-blue-500"
               }`
             }
             onClick={toggleSidebar}
@@ -152,8 +158,7 @@ const Sidebar = ({ isOpen, toggleSidebar }) => {
           <NavLink
             to="/item"
             className={({ isActive }) =>
-              `font-semibold transition duration-200 px-4 py-2 rounded ${
-                isActive ? "bg-blue-600 text-white" : "text-gray-600 hover:bg-blue-100 hover:text-blue-500"
+              `font-semibold transition duration-200 px-4 py-2 rounded ${isActive ? "bg-blue-600 text-white" : "text-gray-600 hover:bg-blue-100 hover:text-blue-500"
               }`
             }
             onClick={toggleSidebar}
@@ -163,8 +168,7 @@ const Sidebar = ({ isOpen, toggleSidebar }) => {
           <NavLink
             to="/companies"
             className={({ isActive }) =>
-              `font-semibold transition duration-200 px-4 py-2 rounded ${
-                isActive ? "bg-blue-600 text-white" : "text-gray-600 hover:bg-blue-100 hover:text-blue-500"
+              `font-semibold transition duration-200 px-4 py-2 rounded ${isActive ? "bg-blue-600 text-white" : "text-gray-600 hover:bg-blue-100 hover:text-blue-500"
               }`
             }
             onClick={toggleSidebar}
@@ -172,10 +176,19 @@ const Sidebar = ({ isOpen, toggleSidebar }) => {
             Companies
           </NavLink>
           <NavLink
+            to="/company-pending-dues"
+            className={({ isActive }) =>
+              `font-semibold transition duration-200 px-4 py-2 rounded ${isActive ? "bg-blue-600 text-white" : "text-gray-600 hover:bg-blue-100 hover:text-blue-500"
+              }`
+            }
+            onClick={toggleSidebar}
+          >
+            Companies Pending Dues
+          </NavLink>
+          <NavLink
             to="/customer-ledger"
             className={({ isActive }) =>
-              `font-semibold transition duration-200 px-4 py-2 rounded ${
-                isActive ? "bg-blue-600 text-white" : "text-gray-600 hover:bg-blue-100 hover:text-blue-500"
+              `font-semibold transition duration-200 px-4 py-2 rounded ${isActive ? "bg-blue-600 text-white" : "text-gray-600 hover:bg-blue-100 hover:text-blue-500"
               }`
             }
             onClick={toggleSidebar}
@@ -185,8 +198,7 @@ const Sidebar = ({ isOpen, toggleSidebar }) => {
           <NavLink
             to="/profit-loss"
             className={({ isActive }) =>
-              `font-semibold transition duration-200 px-4 py-2 rounded ${
-                isActive ? "bg-blue-600 text-white" : "text-gray-600 hover:bg-blue-100 hover:text-blue-500"
+              `font-semibold transition duration-200 px-4 py-2 rounded ${isActive ? "bg-blue-600 text-white" : "text-gray-600 hover:bg-blue-100 hover:text-blue-500"
               }`
             }
             onClick={toggleSidebar}
@@ -196,8 +208,7 @@ const Sidebar = ({ isOpen, toggleSidebar }) => {
           <NavLink
             to="/transfor-data"
             className={({ isActive }) =>
-              `font-semibold transition duration-200 px-4 py-2 rounded ${
-                isActive ? "bg-blue-600 text-white" : "text-gray-600 hover:bg-blue-100 hover:text-blue-500"
+              `font-semibold transition duration-200 px-4 py-2 rounded ${isActive ? "bg-blue-600 text-white" : "text-gray-600 hover:bg-blue-100 hover:text-blue-500"
               }`
             }
             onClick={toggleSidebar}
@@ -236,6 +247,14 @@ function App() {
               element={
                 <PrivateRoute>
                   <Inventory />
+                </PrivateRoute>
+              }
+            />
+            <Route
+              path="/add-user"
+              element={
+                <PrivateRoute>
+                  <AddUser />
                 </PrivateRoute>
               }
             />
@@ -279,6 +298,13 @@ function App() {
                 </PrivateRoute>
               }
             />
+            <Route
+              path="/company-pending-dues"
+              element={
+                <PrivateRoute>
+                  <CompanyPendingDues />
+                </PrivateRoute>
+              } />
             <Route
               path="/customer-ledger"
               element={

@@ -25,11 +25,16 @@ const CompanyLeaders = () => {
   const [rowsPerPage] = useState(5);
   const [companyFormData, setCompanyFormData] = useState({
     companyName: '',
+    brand: '',
+    size: '',
     totalBrands: 0,
     totalItems: 0,
     totalCost: '',
+    totalCompanyItems: 0,
+    totalCompanyCost: '',
     totalPaid: '',
-    due: '',
+    companyDue: '',
+    brandDue: '',
     paymentMethod: '',
     bankName: '',
   });
@@ -44,10 +49,10 @@ const CompanyLeaders = () => {
 
   useEffect(() => {
     const unsubscribeBuy = onSnapshot(collection(db, 'purchasedTyres'), (snapshot) => {
-      const buyList = snapshot.docs.map(doc => ({ 
-        id: doc.id, 
-        ...doc.data(), 
-        date: doc.data().date?.toDate ? doc.data().date.toDate() : new Date(doc.data().date || Date.now()) 
+      const buyList = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data(),
+        date: doc.data().date?.toDate ? doc.data().date.toDate() : new Date(doc.data().date || Date.now())
       }));
       setBuyData(buyList);
     });
@@ -62,7 +67,7 @@ const CompanyLeaders = () => {
       setBrandDetails(brandList);
     });
 
-    const unsubscribeLedger = onSnapshot(collection(db, 'ledgerEntries'), (snapshot) => {
+    const unsubscribeLedger = onSnapshot(collection(db, 'companyLedgerEntries'), (snapshot) => {
       const ledgerList = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       setLedgerEntries(ledgerList);
     });
@@ -95,7 +100,7 @@ const CompanyLeaders = () => {
     });
 
     return Object.keys(companyMap).map(company => {
-      const details = companyDetails.find(detail => detail.companyName === company) || {};
+      const details = companyDetails.find(detail => detail.companyName === company) || { totalPaid: 0 };
       const totalCost = companyMap[company].totalCost;
       const totalPaid = parseFloat(details.totalPaid) || 0;
       const due = (totalCost - totalPaid).toFixed(2);
@@ -151,13 +156,16 @@ const CompanyLeaders = () => {
 
     const brandSummary = Object.values(brandSizeMap)
       .map(entry => {
-        const details = brandDetails.find(detail => detail.companyName === companyName && detail.brand === entry.brand) || {};
+        const details = brandDetails.find(detail => detail.companyName === companyName && detail.brand === entry.brand && detail.size === entry.size) || {};
+        const totalCost = entry.totalCost;
+        const totalPaid = parseFloat(details.totalPaid) || 0;
+        const due = (totalCost - totalPaid).toFixed(2);
         return {
           brand: entry.brand,
           totalItems: entry.totalItems,
-          totalCost: entry.totalCost,
-          totalPaid: parseFloat(details.totalPaid) || 0,
-          due: parseFloat(details.due) || 0,
+          totalCost: totalCost.toFixed(2),
+          totalPaid: totalPaid,
+          due: parseFloat(due) >= 0 ? parseFloat(due) : 0,
           totalReturn: parseFloat(details.totalReturn) || 0,
           sizes: entry.size,
           date: Array.from(entry.dates).sort((a, b) => new Date(b) - new Date(a)).join(', ') || 'N/A',
@@ -207,11 +215,9 @@ const CompanyLeaders = () => {
 
   const getLedgerForCompany = (companyName) => {
     const company = companySummary.find(item => item.company === companyName);
-    if (!company) return [];
+    if (!company) return { ledgerData: [], totalDebit: 0, totalCredit: 0 };
 
-    const fixedBalance = company.totalCost || 0;
-
-    const ledgerData = ledgerEntries
+    const sortedEntries = ledgerEntries
       .filter(entry => entry.companyName === companyName)
       .filter(entry => {
         const entryDate = new Date(entry.date);
@@ -221,13 +227,88 @@ const CompanyLeaders = () => {
         }
         return true;
       })
-      .sort((a, b) => new Date(b.date) - new Date(a.date))
-      .map(entry => ({
-        ...entry,
-        balance: fixedBalance.toFixed(2),
-      }));
+      .sort((a, b) => {
+        const aDate = a.createdAt ? new Date(a.createdAt) : new Date(a.date);
+        const bDate = b.createdAt ? new Date(b.createdAt) : new Date(b.date);
+        return bDate - aDate; // Descending order: newest to oldest
+      });
 
-    return ledgerData;
+    let runningBalance = 0; // Start balance from 0
+    const ledgerData = sortedEntries.map((entry, index) => {
+      const debit = parseFloat(entry.debit) || 0;
+      const credit = parseFloat(entry.credit) || 0;
+      runningBalance = runningBalance + debit - credit; // Debit increases balance, Credit decreases balance
+
+      let detailedNarration = entry.narration || 'N/A';
+      if (entry.narration && entry.narration.startsWith('ONLINE bY')) {
+        detailedNarration = entry.narration;
+      } else {
+        let buyItem = buyData.find(item => item.invoiceNumber === entry.invoiceNumber);
+        if (!buyItem) {
+          buyItem = buyData
+            .filter(item => item.company === companyName && item.brand === entry.brand && item.size === entry.size)
+            .sort((a, b) => new Date(b.date) - new Date(a.date))[0];
+        }
+        if (buyItem) {
+          detailedNarration = `${buyItem.size || 'N/A'} ${buyItem.model || 'N/A'} ${buyItem.brand || 'N/A'} ${buyItem.quantity || 0}X${buyItem.price || 0}`;
+        }
+      }
+
+      return {
+        index: index + 1,
+        invoiceNumber: entry.invoiceNumber || `RV${Date.now()}-${index}`,
+        date: entry.date,
+        narration: detailedNarration,
+        debit,
+        credit,
+        balance: runningBalance.toFixed(2),
+        createdAt: entry.createdAt || entry.date,
+        originalEntry: entry,
+      };
+    });
+
+    const totalDebit = ledgerData.reduce((sum, entry) => sum + (parseFloat(entry.debit) || 0), 0);
+    const totalCredit = ledgerData.reduce((sum, entry) => sum + (parseFloat(entry.credit) || 0), 0);
+
+    return { ledgerData, totalDebit, totalCredit };
+  };
+
+  const getBrandsForCompany = (companyName) => {
+    const company = companySummary.find(item => item.company === companyName);
+    return company ? Object.keys(company.brands).sort() : [];
+  };
+
+  const getSizesForBrand = (companyName, brand) => {
+    const company = companySummary.find(item => item.company === companyName);
+    return company && company.brands[brand] ? Array.from(company.brands[brand].sizes).sort() : [];
+  };
+
+  const getBrandSizeMetrics = (companyName, brand, size) => {
+    let totalItems = 0;
+    let totalCost = 0;
+
+    buyData
+      .filter(item => item.company === companyName && item.brand === brand && item.size === size)
+      .forEach(item => {
+        totalItems += item.quantity;
+        totalCost += item.price * item.quantity;
+      });
+
+    const brandDetail = brandDetails.find(detail => detail.companyName === companyName && detail.brand === brand && detail.size === size) || {};
+    const totalPaid = parseFloat(brandDetail.totalPaid) || 0;
+    const due = (totalCost - totalPaid).toFixed(2);
+
+    return { totalItems, totalCost: totalCost.toFixed(2), totalPaid, due };
+  };
+
+  const getCompanyMetrics = (companyName) => {
+    const company = companySummary.find(item => item.company === companyName);
+    if (!company) return { totalItems: 0, totalCost: 0, due: 0 };
+    return {
+      totalItems: company.totalItems,
+      totalCost: company.totalCost.toFixed(2),
+      due: company.due,
+    };
   };
 
   const openModal = (company) => {
@@ -249,7 +330,21 @@ const CompanyLeaders = () => {
 
   const closeAddCompanyModal = () => {
     setAddCompanyModalIsOpen(false);
-    setCompanyFormData({ companyName: '', totalBrands: 0, totalItems: 0, totalCost: '', totalPaid: '', due: '', paymentMethod: '', bankName: '' });
+    setCompanyFormData({
+      companyName: '',
+      brand: '',
+      size: '',
+      totalBrands: 0,
+      totalItems: 0,
+      totalCost: '',
+      totalCompanyItems: 0,
+      totalCompanyCost: '',
+      totalPaid: '',
+      companyDue: '',
+      brandDue: '',
+      paymentMethod: '',
+      bankName: '',
+    });
   };
 
   const openLedgerModal = (company) => {
@@ -267,15 +362,38 @@ const CompanyLeaders = () => {
     const updatedFormData = { ...companyFormData, [name]: value };
 
     if (name === 'companyName') {
+      updatedFormData.brand = '';
+      updatedFormData.size = '';
       updatedFormData.totalBrands = getTotalBrands(value);
+      updatedFormData.totalItems = 0;
+      updatedFormData.totalCost = '';
+      updatedFormData.totalCompanyItems = 0;
+      updatedFormData.totalCompanyCost = '';
+      updatedFormData.totalPaid = '';
+      updatedFormData.companyDue = '';
+      updatedFormData.brandDue = '';
       updatedFormData.paymentMethod = '';
       updatedFormData.bankName = '';
-      const companyData = companySummary.find(item => item.company === value);
-      const companyDetailsData = companyDetails.find(detail => detail.companyName === value) || {};
-      updatedFormData.totalPaid = companyDetailsData.totalPaid || '';
-      updatedFormData.totalItems = companyData ? companyData.totalItems : 0;
-      updatedFormData.totalCost = companyData ? companyData.totalCost.toFixed(2) : '';
-      updatedFormData.due = companyData ? (companyData.totalCost - (parseFloat(companyDetailsData.totalPaid) || 0)).toFixed(2) : '';
+      const companyMetrics = getCompanyMetrics(value);
+      updatedFormData.totalCompanyItems = companyMetrics.totalItems;
+      updatedFormData.totalCompanyCost = companyMetrics.totalCost;
+      updatedFormData.companyDue = companyMetrics.due;
+    }
+
+    if (name === 'brand') {
+      updatedFormData.size = '';
+      updatedFormData.totalItems = 0;
+      updatedFormData.totalCost = '';
+      updatedFormData.totalPaid = '';
+      updatedFormData.brandDue = '';
+    }
+
+    if (name === 'size') {
+      const metrics = getBrandSizeMetrics(updatedFormData.companyName, updatedFormData.brand, value);
+      updatedFormData.totalItems = metrics.totalItems;
+      updatedFormData.totalCost = metrics.totalCost;
+      updatedFormData.totalPaid = metrics.totalPaid;
+      updatedFormData.brandDue = metrics.due;
     }
 
     if (name === 'paymentMethod') {
@@ -283,11 +401,13 @@ const CompanyLeaders = () => {
     }
 
     if (name === 'totalPaid') {
-      const companyData = companySummary.find(item => item.company === updatedFormData.companyName);
-      const totalCost = companyData?.totalCost || 0;
-      const existingTotalPaid = companyDetails.find(detail => detail.companyName === updatedFormData.companyName)?.totalPaid || 0;
+      const metrics = getBrandSizeMetrics(updatedFormData.companyName, updatedFormData.brand, updatedFormData.size);
+      const totalCost = parseFloat(metrics.totalCost) || 0;
+      const existingTotalPaid = parseFloat(metrics.totalPaid) || 0;
       const newPayment = parseFloat(value) || 0;
-      updatedFormData.due = (totalCost - (existingTotalPaid + newPayment)).toFixed(2);
+      const companyMetrics = getCompanyMetrics(updatedFormData.companyName);
+      updatedFormData.companyDue = (companyMetrics.due - newPayment).toFixed(2);
+      updatedFormData.brandDue = (totalCost - (existingTotalPaid + newPayment)).toFixed(2);
     }
 
     setCompanyFormData(updatedFormData);
@@ -295,10 +415,10 @@ const CompanyLeaders = () => {
 
   const handleAddCompanyDetails = async (e) => {
     e.preventDefault();
-    const { companyName, totalPaid, due, paymentMethod, bankName } = companyFormData;
+    const { companyName, brand, size, totalPaid, paymentMethod, bankName } = companyFormData;
 
-    if (!companyName || !totalPaid || !paymentMethod) {
-      toast.error('Please fill all required fields (Company Name, Total Paid, Payment Method)');
+    if (!companyName || !brand || !size || !totalPaid || !paymentMethod) {
+      toast.error('Please fill all required fields (Company Name, Brand, Size, Total Paid, Payment Method)');
       return;
     }
 
@@ -307,8 +427,9 @@ const CompanyLeaders = () => {
       return;
     }
 
-    const companyExists = companyDetails.find(detail => detail.companyName === companyName);
     const companyData = companySummary.find(item => item.company === companyName);
+    const brandDetailExists = brandDetails.find(detail => detail.companyName === companyName && detail.brand === brand && detail.size === size);
+    const companyDetailExists = companyDetails.find(detail => detail.companyName === companyName);
 
     if (!companyData) {
       toast.error('Company not found in purchase data');
@@ -316,71 +437,107 @@ const CompanyLeaders = () => {
     }
 
     const todayDate = new Date().toISOString().split('T')[0];
-    const narration = paymentMethod === 'Bank' ? `Payment via ${bankName}` : `Payment via ${paymentMethod}`;
+    const createdAt = new Date();
+    let narration = '';
+    let debit = 0;
+    let credit = 0;
+
+    if (paymentMethod === 'Bank') {
+      narration = `ONLINE bY ${bankName}`;
+      credit = parseFloat(totalPaid) || 0; // Credit payment reduces balance
+    } else if (paymentMethod === 'Debit Card') {
+      const latestPurchase = buyData
+        .filter(item => item.company === companyName && item.brand === brand && item.size === size)
+        .sort((a, b) => new Date(b.date) - new Date(a.date))[0];
+      if (latestPurchase) {
+        narration = `${latestPurchase.size || 'N/A'} ${latestPurchase.model || 'N/A'} ${latestPurchase.brand || 'N/A'} ${latestPurchase.quantity || 0}X${latestPurchase.price || 0}`;
+      } else {
+        narration = 'Debit Payment';
+      }
+      debit = parseFloat(totalPaid) || 0; // Debit payment increases balance
+    }
 
     try {
-      if (companyExists) {
-        const companyDoc = doc(db, 'companyDetails', companyExists.id);
-        const existingTotalPaid = parseFloat(companyExists.totalPaid) || 0;
+      // Update or add brand-specific details
+      if (brandDetailExists) {
+        const brandDoc = doc(db, 'brandDetails', brandDetailExists.id);
+        const existingTotalPaid = parseFloat(brandDetailExists.totalPaid) || 0;
         const newTotalPaid = existingTotalPaid + (parseFloat(totalPaid) || 0);
-        const newDue = (companyData.totalCost - newTotalPaid).toFixed(2);
-        await updateDoc(companyDoc, {
+        const brandTotalCost = parseFloat(companyFormData.totalCost) || 0;
+        const newDue = (brandTotalCost - newTotalPaid).toFixed(2);
+        await updateDoc(brandDoc, {
           companyName,
+          brand,
+          size,
           totalPaid: newTotalPaid,
           due: parseFloat(newDue) >= 0 ? parseFloat(newDue) : 0,
           paymentMethod,
           bankName: paymentMethod === 'Bank' ? bankName : '',
           date: todayDate,
-          totalItems: companyData.totalItems,
-          totalCost: companyData.totalCost,
+          totalItems: companyFormData.totalItems,
+          totalCost: parseFloat(companyFormData.totalCost),
         });
-        await addDoc(collection(db, 'ledgerEntries'), {
-          companyName,
-          invoiceNumber: `RV${Date.now()}`,
-          date: todayDate,
-          narration,
-          debit: paymentMethod === 'Debit Card' || paymentMethod === 'Credit Card' ? parseFloat(totalPaid) || 0 : 0,
-          credit: paymentMethod === 'Bank' ? parseFloat(totalPaid) || 0 : 0,
-        });
-        toast.success('Company details updated successfully');
       } else {
-        await addDoc(collection(db, 'companyDetails'), {
+        const brandTotalCost = parseFloat(companyFormData.totalCost) || 0;
+        const newDue = (brandTotalCost - parseFloat(totalPaid)).toFixed(2);
+        await addDoc(collection(db, 'brandDetails'), {
           companyName,
+          brand,
+          size,
           totalPaid: parseFloat(totalPaid),
-          due: parseFloat(due),
+          due: parseFloat(newDue) >= 0 ? parseFloat(newDue) : 0,
           paymentMethod,
           bankName: paymentMethod === 'Bank' ? bankName : '',
           date: todayDate,
-          totalItems: companyData.totalItems,
-          totalCost: companyData.totalCost,
+          totalItems: companyFormData.totalItems,
+          totalCost: parseFloat(companyFormData.totalCost),
         });
-        await addDoc(collection(db, 'ledgerEntries'), {
-          companyName,
-          invoiceNumber: `RV${Date.now()}`,
-          date: todayDate,
-          narration,
-          debit: paymentMethod === 'Debit Card' || paymentMethod === 'Credit Card' ? parseFloat(totalPaid) || 0 : 0,
-          credit: paymentMethod === 'Bank' ? parseFloat(totalPaid) || 0 : 0,
-        });
-        toast.success('Company details added successfully');
       }
 
-      buyData
-        .filter(item => item.company === companyName && item.invoiceNumber)
-        .forEach(async (item) => {
-          const existingLedgerEntry = ledgerEntries.find(entry => entry.invoiceNumber === item.invoiceNumber);
-          if (!existingLedgerEntry) {
-            await addDoc(collection(db, 'ledgerEntries'), {
-              companyName,
-              invoiceNumber: item.invoiceNumber,
-              date: item.date instanceof Date ? item.date.toISOString().split('T')[0] : item.date,
-              narration: item.narration || `${item.size} ${item.brand} Qty_${item.quantity}_Rate_${item.price}`,
-              debit: item.price * item.quantity,
-              credit: 0,
-            });
-          }
+      // Update company-level totalPaid and due
+      let companyTotalPaid = 0;
+      brandDetails
+        .filter(detail => detail.companyName === companyName)
+        .forEach(detail => {
+          companyTotalPaid += parseFloat(detail.totalPaid) || 0;
         });
+      companyTotalPaid += parseFloat(totalPaid) || 0;
 
+      if (companyDetailExists) {
+        const companyDoc = doc(db, 'companyDetails', companyDetailExists.id);
+        const companyTotalCost = companySummary.find(item => item.company === companyName)?.totalCost || 0;
+        const companyDue = (companyTotalCost - companyTotalPaid).toFixed(2);
+        await updateDoc(companyDoc, {
+          companyName,
+          totalPaid: companyTotalPaid,
+          due: parseFloat(companyDue) >= 0 ? parseFloat(companyDue) : 0,
+          date: todayDate,
+        });
+      } else {
+        const companyTotalCost = companySummary.find(item => item.company === companyName)?.totalCost || 0;
+        const companyDue = (companyTotalCost - companyTotalPaid).toFixed(2);
+        await addDoc(collection(db, 'companyDetails'), {
+          companyName,
+          totalPaid: companyTotalPaid,
+          due: parseFloat(companyDue) >= 0 ? parseFloat(companyDue) : 0,
+          date: todayDate,
+        });
+      }
+
+      // Add ledger entry
+      await addDoc(collection(db, 'companyLedgerEntries'), {
+        companyName,
+        brand,
+        size,
+        invoiceNumber: `RV${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+        date: todayDate,
+        narration,
+        debit,
+        credit,
+        createdAt,
+      });
+
+      toast.success('Payment details saved successfully');
       closeAddCompanyModal();
     } catch (error) {
       toast.error('Error saving details');
@@ -394,15 +551,12 @@ const CompanyLeaders = () => {
       return;
     }
 
-    const ledgerData = getLedgerForCompany(selectedCompany.company);
-    const company = companySummary.find(item => item.company === selectedCompany.company);
+    const { ledgerData, totalDebit, totalCredit } = getLedgerForCompany(selectedCompany.company);
 
-    if (!company) {
-      toast.error('Company data not found');
+    if (!ledgerData.length) {
+      toast.error('No ledger data available for printing');
       return;
     }
-
-    const fixedBalance = company.totalCost || 0;
 
     const printWindow = window.open('', '_blank');
     printWindow.document.write(`
@@ -412,28 +566,35 @@ const CompanyLeaders = () => {
           <style>
             body { font-family: Arial, sans-serif; margin: 20px; }
             .container { max-width: 1200px; margin: 0 auto; padding: 20px; border: 2px solid #000; border-radius: 10px; }
-            h1 { text-align: center; color: #1e40af; font-size: 24px; }
             .header { margin-bottom: 20px; text-align: center; }
-            .header p { margin: 5px 0; font-size: 14px; }
+            .header .title { font-size: 24px; font-weight: bold; }
+            .header .party { font-size: 16px; margin: 5px 0; }
+            .header .account { font-size: 14px; margin: 5px 0; }
+            .header .date-range { font-size: 14px; margin: 5px 0; }
+            .header .date { font-size: 14px; margin: 5px 0; text-align: right; }
+            .header .page { font-size: 12px; color: #666; text-align: right; }
             table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-            th, td { border: 1px solid #000; padding: 8px; text-align: right; font-size: 14px; }
-            th { background-color: #1e40af; color: white; text-align: center; }
-            tr:nth-child(even) { background-color: #f2f2f2; }
+            th, td { border: 1px solid #000; padding: 8px; text-align: right; }
+            th { background-color: #000; color: white; text-align: center; }
+            td.text-left { text-align: left; }
+            .total-row td { font-weight: bold; }
             .footer { margin-top: 20px; text-align: center; color: #666; font-size: 12px; }
           </style>
         </head>
         <body>
           <div class="container">
-            <h1>${selectedCompany.company} Ledger</h1>
             <div class="header">
-              <p>Sarhad Tyre Traders</p>
-              <p>Date: ${new Date().toLocaleString()}</p>
-              <p>Total Cost: Rs. ${company.totalCost.toLocaleString()}</p>
+              <div class="title">SARHAD TYRE TRADERS</div>
+              <div class="party">Party Name: ${selectedCompany.company}</div>
+              <div class="account">ACCOUNT LEDGER</div>
+              <div class="date-range">Date ${new Date(ledgerFilterDates.startDate || '2024-01-01').toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' }).toUpperCase()} - ${new Date(ledgerFilterDates.endDate || new Date()).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' }).toUpperCase()}</div>
+              <div class="date">Date: ${new Date().toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true }).toUpperCase()}</div>
+              <div class="page">Page 1</div>
             </div>
             <table>
               <thead>
                 <tr>
-                  <th>Inv.#</th>
+                  <th>Inv. #</th>
                   <th>Inv. Date</th>
                   <th>Narration</th>
                   <th>Debit Rs.</th>
@@ -442,25 +603,26 @@ const CompanyLeaders = () => {
                 </tr>
               </thead>
               <tbody>
-                ${ledgerData.map(entry => {
-                  const debit = parseFloat(entry.debit) || 0;
-                  const credit = parseFloat(entry.credit) || 0;
-                  const date = new Date(entry.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' }).replace(/ /g, '-');
-                  return `
-                    <tr>
-                      <td>${entry.invoiceNumber || 'N/A'}</td>
-                      <td>${date}</td>
-                      <td>${entry.narration || 'N/A'}</td>
-                      <td>${debit.toLocaleString()}</td>
-                      <td>${credit.toLocaleString()}</td>
-                      <td>${fixedBalance.toLocaleString()}</td>
-                    </tr>
-                  `;
-                }).join('')}
+                ${ledgerData.map(entry => `
+                  <tr>
+                    <td>${entry.invoiceNumber}</td>
+                    <td>${new Date(entry.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' }).toUpperCase()}</td>
+                    <td class="text-left">${entry.narration}</td>
+                    <td>${entry.debit.toLocaleString()}</td>
+                    <td>${entry.credit.toLocaleString()}</td>
+                    <td>${parseFloat(entry.balance).toLocaleString()}</td>
+                  </tr>
+                `).join('')}
+                <tr class="total-row">
+                  <td colspan="3">Total:</td>
+                  <td>${totalDebit.toLocaleString()}</td>
+                  <td>${totalCredit.toLocaleString()}</td>
+                  <td></td>
+                </tr>
               </tbody>
             </table>
             <div class="footer">
-              <p>Generated by Sarhad Tyre Traders</p>
+              <p>Generated by SARHAD TYRE TRADERS</p>
             </div>
           </div>
           <script>
@@ -478,7 +640,7 @@ const CompanyLeaders = () => {
   return (
     <div className="p-6 max-w-7xl mx-auto bg-gradient-to-b from-gray-50 to-gray-100 min-h-screen">
       <h1 className="text-4xl font-extrabold mb-8 text-gray-900 bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text">
-        Party Leaders Dashboard
+        Company Ledger Dashboard
       </h1>
       <div className="flex flex-col sm:flex-row sm:justify-between gap-4 mb-8">
         <input
@@ -492,7 +654,7 @@ const CompanyLeaders = () => {
           onClick={openAddCompanyModal}
           className="px-6 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-xl shadow hover:shadow-lg hover:from-blue-700 hover:to-indigo-700 transition duration-300"
         >
-          Add Company Details
+          Add Brand Payment Details
         </button>
       </div>
 
@@ -506,6 +668,8 @@ const CompanyLeaders = () => {
             <h2 className="text-xl font-semibold text-gray-800">{item.company}</h2>
             <p className="text-sm text-gray-500 mt-2">Total Items: {item.totalItems}</p>
             <p className="text-sm text-gray-500">Total Cost: Rs. {item.totalCost.toLocaleString()}</p>
+            <p className="text-sm text-gray-500">Total Paid: Rs. {item.totalPaid.toLocaleString()}</p>
+            <p className="text-sm text-gray-500">Due: Rs. {item.due.toLocaleString()}</p>
           </div>
         ))}
       </div>
@@ -531,7 +695,7 @@ const CompanyLeaders = () => {
             </h2>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
               <div className="bg-gray-50 p-4 rounded-xl shadow-sm hover:shadow-md transition duration-200">
-                <p className="text-sm font-medium text-gray-600">Party Name</p>
+                <p className="text-sm font-medium text-gray-600">Company Name</p>
                 <p className="text-lg font-semibold text-gray-800">{selectedCompany.company}</p>
               </div>
               <div className="bg-gray-50 p-4 rounded-xl shadow-sm hover:shadow-md transition duration-200">
@@ -546,7 +710,7 @@ const CompanyLeaders = () => {
                 <p className="text-sm font-medium text-gray-600">Total Paid</p>
                 <p className="text-lg font-semibold text-gray-800">Rs. {selectedCompany.totalPaid.toLocaleString()}</p>
               </div>
-              <div className ="bg-gray-50 p-4 rounded-xl shadow-sm hover:shadow-md transition duration-200">
+              <div className="bg-gray-50 p-4 rounded-xl shadow-sm hover:shadow-md transition duration-200">
                 <p className="text-sm font-medium text-gray-600">Total Due</p>
                 <p className="text-lg font-semibold text-gray-800">Rs. {selectedCompany.due.toLocaleString()}</p>
               </div>
@@ -607,21 +771,25 @@ const CompanyLeaders = () => {
               <table className="min-w-full border-collapse text-sm text-left bg-white rounded-xl shadow-sm">
                 <thead>
                   <tr className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white">
-                    <th className="py-3 px-6 font-semibold border-1 border-black">Brand</th>
-                    <th className="py-3 px-6 font-semibold border-1 border-black">Sizes</th>
-                    <th className="py-3 px-6 font-semibold border-1 border-black">Total Items</th>
-                    <th className="py-3 px-6 font-semibold border-1 border-black">Total Cost</th>
-                    <th className="py-3 px-6 font-semibold border-1 border-black">Purchase Date</th>
+                    <th className="py-3 px-6 font-semibold border border-black">Brand</th>
+                    <th className="py-3 px-6 font-semibold border border-black">Sizes</th>
+                    <th className="py-3 px-6 font-semibold border border-black">Total Items</th>
+                    <th className="py-3 px-6 font-semibold border border-black">Total Cost</th>
+                    <th className="py-3 px-6 font-semibold border border-black">Total Paid</th>
+                    <th className="py-3 px-6 font-semibold border border-black">Due</th>
+                    <th className="py-3 px-6 font-semibold border border-black">Purchase Date</th>
                   </tr>
                 </thead>
                 <tbody>
                   {getBrandSummary(selectedCompany.company).map((brand, index) => (
                     <tr key={index} className="border-b border-gray-200 hover:bg-gray-50 transition duration-200">
-                      <td className="py-3 px-6 border-1">{brand.brand}</td>
-                      <td className="py-3 px-6 border-1">{brand.sizes}</td>
-                      <td className="py-3 px-6 border-1">{brand.totalItems}</td>
-                      <td className="py-3 px-6 border-1">Rs. {brand.totalCost.toLocaleString()}</td>
-                      <td className="py-3 px-6 border-1">{brand.date}</td>
+                      <td className="py-3 px-6 border border-black">{brand.brand}</td>
+                      <td className="py-3 px-6 border border-black">{brand.sizes}</td>
+                      <td className="py-3 px-6 border border-black">{brand.totalItems}</td>
+                      <td className="py-3 px-6 border border-black">Rs. {brand.totalCost.toLocaleString()}</td>
+                      <td className="py-3 px-6 border border-black">Rs. {brand.totalPaid.toLocaleString()}</td>
+                      <td className="py-3 px-6 border border-black">Rs. {brand.due.toLocaleString()}</td>
+                      <td className="py-3 px-6 border border-black">{brand.date}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -657,7 +825,7 @@ const CompanyLeaders = () => {
         overlayClassName="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center"
       >
         <h2 className="text-2xl font-bold mb-6 text-gray-800 bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text">
-          Add Company Details
+          Add Brand Payment Details
         </h2>
         <form onSubmit={handleAddCompanyDetails} className="flex flex-wrap gap-4">
           <div className="w-full md:w-[48%]">
@@ -678,6 +846,40 @@ const CompanyLeaders = () => {
             </datalist>
           </div>
           <div className="w-full md:w-[48%]">
+            <label className="block text-sm font-medium mb-1 text-gray-700">Brand</label>
+            <input
+              type="text"
+              name="brand"
+              value={companyFormData.brand}
+              onChange={handleCompanyFormChange}
+              list="brandNames"
+              className="w-full px-4 py-2 border border-gray-200 rounded-xl shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              required
+            />
+            <datalist id="brandNames">
+              {getBrandsForCompany(companyFormData.companyName).map((brand, index) => (
+                <option key={index} value={brand} />
+              ))}
+            </datalist>
+          </div>
+          <div className="w-full md:w-[48%]">
+            <label className="block text-sm font-medium mb-1 text-gray-700">Size</label>
+            <input
+              type="text"
+              name="size"
+              value={companyFormData.size}
+              onChange={handleCompanyFormChange}
+              list="sizeNames"
+              className="w-full px-4 py-2 border border-gray-200 rounded-xl shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              required
+            />
+            <datalist id="sizeNames">
+              {getSizesForBrand(companyFormData.companyName, companyFormData.brand).map((size, index) => (
+                <option key={index} value={size} />
+              ))}
+            </datalist>
+          </div>
+          <div className="w-full md:w-[48%]">
             <label className="block text-sm font-medium mb-1 text-gray-700">Total Brands</label>
             <input
               type="number"
@@ -688,7 +890,27 @@ const CompanyLeaders = () => {
             />
           </div>
           <div className="w-full md:w-[48%]">
-            <label className="block text-sm font-medium mb-1 text-gray-700">Total Items</label>
+            <label className="block text-sm font-medium mb-1 text-gray-700">Total Company Items</label>
+            <input
+              type="number"
+              name="totalCompanyItems"
+              value={companyFormData.totalCompanyItems}
+              className="w-full px-4 py-2 border border-gray-200 bg-gray-100 rounded-xl"
+              readOnly
+            />
+          </div>
+          <div className="w-full md:w-[48%]">
+            <label className="block text-sm font-medium mb-1 text-gray-700">Total Company Cost</label>
+            <input
+              type="number"
+              name="totalCompanyCost"
+              value={companyFormData.totalCompanyCost}
+              className="w-full px-4 py-2 border border-gray-200 bg-gray-100 rounded-xl"
+              readOnly
+            />
+          </div>
+          <div className="w-full md:w-[48%]">
+            <label className="block text-sm font-medium mb-1 text-gray-700">Total Items (Brand)</label>
             <input
               type="number"
               name="totalItems"
@@ -698,7 +920,7 @@ const CompanyLeaders = () => {
             />
           </div>
           <div className="w-full md:w-[48%]">
-            <label className="block text-sm font-medium mb-1 text-gray-700">Total Cost</label>
+            <label className="block text-sm font-medium mb-1 text-gray-700">Total Cost (Brand)</label>
             <input
               type="number"
               name="totalCost"
@@ -708,7 +930,7 @@ const CompanyLeaders = () => {
             />
           </div>
           <div className="w-full md:w-[48%]">
-            <label className="block text-sm font-medium mb-1 text-gray-700">Total Paid</label>
+            <label className="block text-sm font-medium mb-1 text-gray-700">Payment Amount</label>
             <input
               type="number"
               name="totalPaid"
@@ -719,11 +941,21 @@ const CompanyLeaders = () => {
             />
           </div>
           <div className="w-full md:w-[48%]">
-            <label className="block text-sm font-medium mb-1 text-gray-700">Due</label>
+            <label className="block text-sm font-medium mb-1 text-gray-700">Due (Company)</label>
             <input
               type="number"
-              name="due"
-              value={companyFormData.due}
+              name="companyDue"
+              value={companyFormData.companyDue}
+              className="w-full px-4 py-2 border border-gray-200 bg-gray-100 rounded-xl"
+              readOnly
+            />
+          </div>
+          <div className="w-full md:w-[48%]">
+            <label className="block text-sm font-medium mb-1 text-gray-700">Due (Brand)</label>
+            <input
+              type="number"
+              name="brandDue"
+              value={companyFormData.brandDue}
               className="w-full px-4 py-2 border border-gray-200 bg-gray-100 rounded-xl"
               readOnly
             />
@@ -738,7 +970,7 @@ const CompanyLeaders = () => {
               required
             >
               <option value="">Select Payment Method</option>
-              <option value="Debit Card">Debit Card</option>
+              <option value="Debit Card">Debit</option>
               <option value="Bank">Bank</option>
             </select>
           </div>
@@ -765,7 +997,7 @@ const CompanyLeaders = () => {
             </button>
             <button
               type="submit"
-              className="px-6 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-xl hover:from-blue-700 hover:to-indigo-700 transition duration-200"
+              className="px-6 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-xl hover:from-blue-700 hover:to-indigo-700 transition duration-300"
             >
               Save
             </button>
@@ -789,12 +1021,24 @@ const CompanyLeaders = () => {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
               </svg>
             </button>
-            <h2 className="text-3xl font-bold mb-6 text-gray-900 bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text">
-              {selectedCompany.company} Ledger
-            </h2>
-            <div className="mb-4">
-              <p className="text-sm font-medium text-gray-600">Sarhad Tyre Traders</p>
-              <p className="text-sm text-gray-500">Date: ${new Date().toLocaleString()}</p>
+            <div className="header mb-6">
+              <h2 className="text-3xl font-bold text-center text-gray-900">SARHAD TYRE TRADERS</h2>
+              <p className="text-md font-bold text-black mt-2">Party Name: ${selectedCompany.company}</p>
+              <div className="flex justify-between mt-3">
+                <div>
+                  <p className="text-sm font-medium text-gray-600">ACCOUNT LEDGER</p>
+                  <p className="text-sm text-gray-500">
+                    Date ${new Date(ledgerFilterDates.startDate || '2024-01-01').toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' }).toUpperCase()} - 
+                    ${new Date(ledgerFilterDates.endDate || new Date()).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' }).toUpperCase()}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-sm text-gray-500 text-right">Page 1</p>
+                  <p className="text-sm font-medium text-gray-600">
+                    Date: ${new Date().toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true }).toUpperCase()}
+                  </p>
+                </div>
+              </div>
             </div>
             <div className="flex flex-col sm:flex-row gap-4 mb-4">
               <div className="flex gap-3">
@@ -830,30 +1074,39 @@ const CompanyLeaders = () => {
               </div>
             </div>
             <div className="overflow-x-auto">
-              <table className="min-w-full border-collapse text-sm text-left bg-white rounded-xl shadow-sm">
+              <table className="min-w-full border-collapse text-sm bg-white rounded-xl shadow-sm">
                 <thead>
-                  <tr className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white">
-                    <th className="py-3 px-6 font-semibold border-1 border-black">Inv.#</th>
-                    <th className="py-3 px-6 font-semibold border-1 border-black">Inv. Date</th>
-                    <th className="py-3 px-6 font-semibold border-1 border-black">Narration</th>
-                    <th className="py-3 px-6 font-semibold border-1 border-black">Debit Rs.</th>
-                    <th className="py-3 px-6 font-semibold border-1 border-black">Credit Rs.</th>
-                    <th className="py-3 px-6 font-semibold border-1 border-black">Balance</th>
+                  <tr>
+                    <th className="py-3 px-6 font-semibold border border-black">Inv. #</th>
+                    <th className="py-3 px-6 font-semibold border border-black">Inv. Date</th>
+                    <th className="py-3 px-6 font-semibold border border-black">Narration</th>
+                    <th className="py-3 px-6 font-semibold border border-black">Debit Rs.</th>
+                    <th className="py-3 px-6 font-semibold border border-black">Credit Rs.</th>
+                    <th className="py-3 px-6 font-semibold border border-black">Balance</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {getLedgerForCompany(selectedCompany.company).map((entry, index) => (
+                  {getLedgerForCompany(selectedCompany.company).ledgerData.map((entry, index) => (
                     <tr key={index} className="border-b border-gray-200 hover:bg-gray-50 transition duration-200">
-                      <td className="py-3 px-6 border-1">{entry.invoiceNumber}</td>
-                      <td className="py-3 px-6 border-1">{new Date(entry.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' }).replace(/ /g, '-')}</td>
-                      <td className="py-3 px-6 border-1">{entry.narration}</td>
-                      <td className="py-3 px-6 border-1">{entry.debit.toLocaleString()}</td>
-                      <td className="py-3 px-6 border-1">{entry.credit.toLocaleString()}</td>
-                      <td className="py-3 px-6 border-1">{entry.balance.toLocaleString()}</td>
+                      <td className="py-3 px-6 border border-black">{entry.invoiceNumber}</td>
+                      <td className="py-3 px-6 border border-black">{new Date(entry.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' }).toUpperCase()}</td>
+                      <td className="py-3 px-6 border border-black text-left">{entry.narration}</td>
+                      <td className="py-3 px-6 border border-black">{(parseFloat(entry.debit) || 0).toLocaleString()}</td>
+                      <td className="py-3 px-6 border border-black">{(parseFloat(entry.credit) || 0).toLocaleString()}</td>
+                      <td className="py-3 px-6 border border-black">{parseFloat(entry.balance).toLocaleString()}</td>
                     </tr>
                   ))}
+                  <tr className="font-bold">
+                    <td colSpan="3" className="py-3 px-6 border border-black text-right">Total:</td>
+                    <td className="py-3 px-6 border border-black">{getLedgerForCompany(selectedCompany.company).totalDebit.toLocaleString()}</td>
+                    <td className="py-3 px-6 border border-black">{getLedgerForCompany(selectedCompany.company).totalCredit.toLocaleString()}</td>
+                    <td className="py-3 px-6 border border-black"></td>
+                  </tr>
                 </tbody>
               </table>
+            </div>
+            <div className="footer mt-6 text-center text-gray-600 text-sm">
+              <p>Generated by SARHAD TYRE TRADERS</p>
             </div>
             <div className="flex justify-end gap-4 mt-6">
               <button

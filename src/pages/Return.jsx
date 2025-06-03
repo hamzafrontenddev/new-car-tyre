@@ -5,6 +5,7 @@ import { toast } from "react-toastify";
 import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
 import { CalendarIcon } from "@heroicons/react/24/outline";
+import { v4 as uuidv4 } from "uuid";
 
 const filterByDateRange = (data, start, end) => {
   if (!start || !end) return data;
@@ -15,22 +16,25 @@ const filterByDateRange = (data, start, end) => {
 };
 
 const Return = () => {
+  const initialItemState = {
+    customer: "",
+    company: "",
+    brand: "",
+    model: "",
+    size: "",
+    price: "",
+    quantity: "",
+    returnQuantity: "",
+    returnPrice: "",
+    discount: "",
+    date: new Date().toISOString().split("T")[0],
+    comment: "",
+  };
+
+  const [formItems, setFormItems] = useState([initialItemState]);
   const [soldTyres, setSoldTyres] = useState([]);
   const [returns, setReturns] = useState([]);
-  const [manualReturnPrice, setManualReturnPrice] = useState("");
   const [selectedReturn, setSelectedReturn] = useState(null);
-  const [selectedCustomer, setSelectedCustomer] = useState("");
-  const [selectedCompany, setSelectedCompany] = useState("");
-  const [selectedBrand, setSelectedBrand] = useState("");
-  const [selectedModel, setSelectedModel] = useState("");
-  const [selectedSize, setSelectedSize] = useState("");
-  const [price, setPrice] = useState("");
-  const [quantity, setQuantity] = useState("");
-  const [returnQuantity, setReturnQuantity] = useState("");
-  const [discount, setDiscount] = useState("");
-  const [due, setDue] = useState("");
-  const [date, setDate] = useState("");
-  const [comment, setComment] = useState("");
   const [search, setSearch] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
   const [showCustomerDropdown, setShowCustomerDropdown] = useState(false);
@@ -40,16 +44,31 @@ const Return = () => {
   const [endDate, setEndDate] = useState(null);
 
   useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (customerInputRef.current && !customerInputRef.current.contains(event.target)) {
+        setShowCustomerDropdown(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  useEffect(() => {
     const unsub1 = onSnapshot(collection(db, "soldTyres"), (snapshot) => {
       const data = snapshot.docs.map((doc) => doc.data());
       setSoldTyres(data);
-      console.log("soldTyres:", data);
+    }, (error) => {
+      console.error("Error fetching soldTyres:", error);
+      toast.error("Failed to load sold tyres");
     });
 
     const unsub2 = onSnapshot(collection(db, "returnedTyres"), (snapshot) => {
       let data = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
       data = filterByDateRange(data, startDate, endDate);
       setReturns(data);
+    }, (error) => {
+      console.error("Error fetching returnedTyres:", error);
+      toast.error("Failed to load returns");
     });
 
     return () => {
@@ -59,352 +78,405 @@ const Return = () => {
   }, [startDate, endDate]);
 
   const customers = [...new Set(soldTyres.map((t) => t.customerName).filter((c) => c && c.trim() !== ""))];
-  const companies = [
-    ...new Set(
-      soldTyres.filter((t) => t.customerName === selectedCustomer).map((t) => t.company)
-    ),
-  ];
-  const brands = [
-    ...new Set(
-      soldTyres
-        .filter((t) => t.customerName === selectedCustomer && t.company === selectedCompany)
-        .map((t) => t.brand)
-    ),
-  ];
-  const models = [
-    ...new Set(
-      soldTyres
-        .filter((t) =>
-          t.customerName === selectedCustomer &&
-          t.company === selectedCompany &&
-          t.brand === selectedBrand
-        )
-        .map((t) => t.model)
-    ),
-  ];
-  const sizes = [
-    ...new Set(
-      soldTyres
-        .filter((t) =>
-          t.customerName === selectedCustomer &&
-          t.company === selectedCompany &&
-          t.brand === selectedBrand &&
-          t.model === selectedModel
-        )
-        .map((t) => t.size)
-    ),
-  ];
 
-  useEffect(() => {
-    const match = soldTyres.find(
-      (t) =>
-        t.customerName === selectedCustomer &&
-        t.company === selectedCompany &&
-        t.brand === selectedBrand &&
-        t.model === selectedModel &&
-        t.size === selectedSize
-    );
+  const getFilteredOptions = (index) => {
+    const company = formItems[index].company;
+    const brand = formItems[index].brand;
+    const model = formItems[index].model;
+    const customer = formItems[0].customer;
 
-    if (match) {
-      setPrice(match.price);
-      setQuantity(match.quantity);
-      setDiscount(match.discount || 0);
-      setDue(match.due || 0);
-    } else {
-      setPrice("");
-      setQuantity("");
-      setDiscount("");
-      setDue("");
-    }
-  }, [selectedCustomer, selectedCompany, selectedBrand, selectedModel, selectedSize, soldTyres]);
+    const companies = [
+      ...new Set(
+        soldTyres.filter((t) => t.customerName === customer).map((t) => t.company)
+      ),
+    ];
+    const brands = [
+      ...new Set(
+        soldTyres
+          .filter((t) => t.customerName === customer && t.company === company)
+          .map((t) => t.brand)
+      ),
+    ];
+    const models = [
+      ...new Set(
+        soldTyres
+          .filter((t) => t.customerName === customer && t.company === company && t.brand === brand)
+          .map((t) => t.model)
+      ),
+    ];
+    const sizes = [
+      ...new Set(
+        soldTyres
+          .filter((t) => t.customerName === customer && t.company === company && t.brand === brand && t.model === model)
+          .map((t) => t.size)
+      ),
+    ];
+
+    return { companies, brands, models, sizes };
+  };
+
+  const handleCustomerChange = (customer) => {
+    setFormItems((prev) => prev.map(item => ({ ...item, customer, company: "", brand: "", model: "", size: "", price: "", quantity: "", discount: "" })));
+    setShowCustomerDropdown(false);
+  };
+
+  const handleFieldChange = (index, field, value) => {
+    setFormItems((prev) => {
+      const newItems = [...prev];
+      newItems[index] = { ...newItems[index], [field]: value };
+
+      if (field === "company") {
+        newItems[index] = { ...newItems[index], brand: "", model: "", size: "", price: "", quantity: "", discount: "" };
+      } else if (field === "brand") {
+        newItems[index] = { ...newItems[index], model: "", size: "", price: "", quantity: "", discount: "" };
+      } else if (field === "model") {
+        newItems[index] = { ...newItems[index], size: "", price: "", quantity: "", discount: "" };
+      }
+
+      if (field === "size") {
+        const match = soldTyres.find(
+          (t) =>
+            t.customerName === newItems[0].customer &&
+            t.company === newItems[index].company &&
+            t.brand === newItems[index].brand &&
+            t.model === newItems[index].model &&
+            t.size === value
+        );
+        if (match) {
+          newItems[index] = {
+            ...newItems[index],
+            price: match.price || "",
+            quantity: match.quantity || "",
+            discount: match.discount || "",
+          };
+        }
+      }
+
+      return newItems;
+    });
+  };
+
+  const addItem = () => {
+    setFormItems((prev) => [
+      ...prev,
+      {
+        ...initialItemState,
+        customer: prev[0].customer,
+        date: prev[0].date,
+      },
+    ]);
+  };
+
+  const removeItem = (index) => {
+    setFormItems((prev) => prev.filter((_, i) => i !== index));
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
 
-    if (!selectedCustomer) {
-      toast.error("Please select a customer");
-      return;
-    }
-    if (!selectedCompany) {
-      toast.error("Please select a company");
-      return;
-    }
-    if (!selectedBrand) {
-      toast.error("Please select a brand");
-      return;
-    }
-    if (!selectedModel) {
-      toast.error("Please select a model");
-      return;
-    }
-    if (!selectedSize) {
-      toast.error("Please select a size");
-      return;
-    }
-    if (!returnQuantity || returnQuantity <= 0) {
-      toast.error("Please enter a valid return quantity");
-      return;
-    }
-    if (!date) {
-      toast.error("Please select a date");
-      return;
+    for (const [index, item] of formItems.entries()) {
+      if (!item.customer || !item.company || !item.brand || !item.model || !item.size || !item.returnQuantity || !item.returnPrice || !item.date) {
+        toast.error(`Please fill all required fields for item ${index + 1}`);
+        return;
+      }
+      if (Number(item.returnQuantity) <= 0) {
+        toast.error(`Return quantity must be greater than 0 for item ${index + 1}`);
+        return;
+      }
+      if (Number(item.returnQuantity) > Number(item.quantity)) {
+        toast.error(`Return quantity cannot exceed original sold quantity for item ${index + 1}`);
+        return;
+      }
     }
 
-    const returnTyre = {
-      customer: selectedCustomer,
-      company: selectedCompany,
-      brand: selectedBrand,
-      model: selectedModel,
-      size: selectedSize,
-      price: Number(price),
-      quantity: Number(quantity),
-      totalPrice: Number(price) * Number(quantity),
-      returnQuantity: Number(returnQuantity),
-      returnPrice: Number(manualReturnPrice),
-      returnTotalPrice: Number(manualReturnPrice) * Number(returnQuantity),
-      date,
-      discount: Number(discount),
-      due: Number(due),
-      comment: comment || "",
-    };
+    const transactionId = uuidv4();
 
     try {
-      await addDoc(collection(db, "returnedTyres"), returnTyre);
+      for (const item of formItems) {
+        const returnTyre = {
+          customer: item.customer,
+          company: item.company,
+          brand: item.brand,
+          model: item.model,
+          size: item.size,
+          price: Number(item.price),
+          quantity: Number(item.quantity),
+          totalPrice: Number(item.price) * Number(item.quantity),
+          returnQuantity: Number(item.returnQuantity),
+          returnPrice: Number(item.returnPrice),
+          returnTotalPrice: Number(item.returnPrice) * Number(item.returnQuantity),
+          date: item.date,
+          discount: Number(item.discount || 0),
+          comment: item.comment || "",
+          transactionId,
+        };
 
-      const purchasedQuery = query(
-        collection(db, "purchasedTyres"),
-        where("company", "==", selectedCompany),
-        where("brand", "==", selectedBrand),
-        where("model", "==", selectedModel),
-        where("size", "==", selectedSize)
-      );
-      const purchasedSnapshot = await getDocs(purchasedQuery);
-      const purchasedTyres = purchasedSnapshot.docs.map((doc) => ({
-        id: doc.id,
-        ...doc.data(),
-      }));
+        await addDoc(collection(db, "returnedTyres"), returnTyre);
 
-      if (purchasedTyres.length === 0) {
-        toast.error("No matching tyre found in purchasedTyres");
-        return;
+        const purchasedQuery = query(
+          collection(db, "purchasedTyres"),
+          where("company", "==", item.company),
+          where("brand", "==", item.brand),
+          where("model", "==", item.model),
+          where("size", "==", item.size)
+        );
+        const purchasedSnapshot = await getDocs(purchasedQuery);
+        const purchasedTyres = purchasedSnapshot.docs.map((doc) => ({
+          id: doc.id,
+          ...doc.data(),
+        }));
+
+        if (purchasedTyres.length === 0) {
+          toast.error(`No matching tyre found in purchasedTyres for item ${item.company} ${item.brand} ${item.model} (${item.size})`);
+          continue;
+        }
+
+        const targetTyre = purchasedTyres[0];
+        const currentShop = parseInt(targetTyre.shop) || 0;
+        const newShopQuantity = currentShop + Number(item.returnQuantity);
+
+        await updateDoc(doc(db, "purchasedTyres", targetTyre.id), {
+          shop: newShopQuantity,
+        });
       }
 
-      if (Number(returnQuantity) > Number(quantity)) {
-        toast.error("Return quantity cannot exceed original sold quantity");
-        return;
-      }
-
-      const targetTyre = purchasedTyres[0];
-      const currentShop = parseInt(targetTyre.shop) || 0;
-      const newShopQuantity = currentShop + Number(returnQuantity);
-
-      await updateDoc(doc(db, "purchasedTyres", targetTyre.id), {
-        shop: newShopQuantity,
-      });
-      console.log(`Added ${returnQuantity} to shop quantity for tyre ID: ${targetTyre.id}`);
-      toast.success(`Shop quantity updated to ${newShopQuantity}`);
-
-      toast.success("Tyre returned successfully!");
-      setManualReturnPrice("");
-      setSelectedCustomer("");
-      setSelectedCompany("");
-      setSelectedBrand("");
-      setSelectedModel("");
-      setSelectedSize("");
-      setPrice("");
-      setQuantity("");
-      setReturnQuantity("");
-      setDiscount("");
-      setDue("");
-      setDate("");
-      setComment("");
-      setShowCustomerDropdown(false);
+      toast.success("Tyres returned successfully!");
+      setFormItems([initialItemState]);
     } catch (err) {
-      toast.error("Error returning tyre.");
+      console.error("Error returning tyres:", err);
+      toast.error("Error returning tyres.");
     }
   };
 
   const filteredReturns = returns.filter((t) =>
-    `${t.customer} ${t.company} ${t.brand} ${t.model} ${t.size} ${t.customer}`
+    `${t.customer} ${t.company} ${t.brand} ${t.model} ${t.size} ${t.comment}`
       .toLowerCase()
       .includes(search.toLowerCase())
   );
 
+  const groupedByTransaction = filteredReturns.reduce((acc, returnItem) => {
+    const tid = returnItem.transactionId || returnItem.id;
+    if (!acc[tid]) {
+      acc[tid] = [];
+    }
+    acc[tid].push(returnItem);
+    return acc;
+  }, {});
+
+  const transactions = Object.entries(groupedByTransaction).map(([tid, items]) => ({
+    transactionId: tid,
+    items,
+    customerName: items[0]?.customer || "N/A",
+    date: items[0]?.date || "",
+    brands: items.map(item => item.brand).join(", "),
+    models: items.map(item => item.model).join(", "),
+    sizes: items.map(item => item.size).join(", "),
+    quantities: items.map(item => item.quantity).join(", "),
+    returnQuantities: items.map(item => item.returnQuantity).join(", "),
+    prices: items.map(item => `Rs. ${item.price.toFixed(2)}`).join(", "),
+    returnPrices: items.map(item => `Rs. ${item.returnPrice.toFixed(2)}`).join(", "),
+    returnTotalPrices: items.reduce((sum, item) => sum + item.returnTotalPrice, 0),
+    discounts: items.map(item => item.discount || 0).join(", "),
+    comments: items.map(item => item.comment || "N/A").join(", "),
+  }));
+
   const indexOfLastItem = currentPage * itemsPerPage;
   const indexOfFirstItem = indexOfLastItem - itemsPerPage;
-  const currentItems = filteredReturns.slice(indexOfFirstItem, indexOfLastItem);
-  const totalPages = Math.ceil(filteredReturns.length / itemsPerPage);
+  const currentTransactions = transactions.slice(indexOfFirstItem, indexOfLastItem);
+  const totalPages = Math.ceil(transactions.length / itemsPerPage);
 
   const paginate = (pageNumber) => setCurrentPage(pageNumber);
 
   return (
-    <div className="p-6 max-w-7xl mx-auto">
-      <h2 className="text-xl font-semibold mb-4">🛒 Return Item</h2>
+    <div className="container mx-auto p-6 bg-gray-50 min-h-screen">
+      <h1 className="text-3xl font-bold text-blue-600 mb-6">🛒 Return Tyres</h1>
 
-      <form className="grid grid-cols-3 gap-4 mb-6" onSubmit={handleSubmit}>
-        <div className="relative">
-          <input
-            ref={customerInputRef}
-            type="text"
-            placeholder="Search or select customer..."
-            value={selectedCustomer}
-            onChange={(e) => setSelectedCustomer(e.target.value)}
-            onFocus={() => setShowCustomerDropdown(true)}
-            onBlur={() => setTimeout(() => setShowCustomerDropdown(false), 200)}
-            className="border border-gray-300 rounded px-3 py-2 w-full focus:outline-none focus:ring-2 focus:ring-blue-400"
-          />
-          {showCustomerDropdown && (
-            <div className="absolute z-10 w-full bg-white border border-gray-300 rounded mt-1 max-h-40 overflow-y-auto">
-              {customers
-                .filter((c) =>
-                  c.toLowerCase().includes(selectedCustomer.toLowerCase())
-                )
-                .map((c) => (
-                  <div
-                    key={c}
-                    onClick={() => {
-                      setSelectedCustomer(c);
-                      setShowCustomerDropdown(false);
-                      customerInputRef.current?.blur();
-                    }}
-                    className="px-3 py-2 hover:bg-gray-100 cursor-pointer"
+      <div className="bg-white p-6 rounded-lg shadow-lg mb-6">
+        <h2 className="text-lg font-semibold mb-4">Return Form</h2>
+        <form onSubmit={handleSubmit}>
+          <div className="mb-4">
+            <label className="block text-sm font-medium text-gray-700 mb-1">Customer Name</label>
+            <input
+              ref={customerInputRef}
+              type="text"
+              placeholder="Search or type customer..."
+              value={formItems[0].customer}
+              onChange={(e) => handleCustomerChange(e.target.value)}
+              onFocus={() => setShowCustomerDropdown(true)}
+              className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none"
+            />
+            {showCustomerDropdown && (
+              <div className="absolute bg-white border border-gray-300 rounded-lg shadow-lg mt-1 w-64 max-h-40 overflow-y-auto z-10">
+                {customers
+                  .filter((c) => c.toLowerCase().includes(formItems[0].customer.toLowerCase()))
+                  .map((customer) => (
+                    <div
+                      key={customer}
+                      onClick={() => handleCustomerChange(customer)}
+                      className="p-2 hover:bg-blue-600 cursor-pointer text-gray-700"
+                    >
+                      {customer}
+                    </div>
+                  ))}
+              </div>
+            )}
+          </div>
+          {formItems.map((item, index) => (
+            <div key={index} className="mb-6 p-4 rounded-lg border border-gray-200 shadow-sm">
+              <h3 className="text-lg font-semibold mb-4">Return Item #{index + 1}</h3>
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Company</label>
+                  <select
+                    value={item.company}
+                    onChange={(e) => handleFieldChange(index, "company", e.target.value)}
+                    className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-400 focus:outline-none"
                   >
-                    {c}
-                  </div>
-                ))}
+                    <option value="">Select Company</option>
+                    {getFilteredOptions(index).companies.map((c) => (
+                      <option key={c} value={c}>{c}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Brand</label>
+                  <select
+                    value={item.brand}
+                    onChange={(e) => handleFieldChange(index, "brand", e.target.value)}
+                    className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-400 focus:outline-none"
+                  >
+                    <option value="">Select Brand</option>
+                    {getFilteredOptions(index).brands.map((b) => (
+                      <option key={b} value={b}>{b}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Model</label>
+                  <select
+                    value={item.model}
+                    onChange={(e) => handleFieldChange(index, "model", e.target.value)}
+                    className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-400 focus:outline-none"
+                  >
+                    <option value="">Select Model</option>
+                    {getFilteredOptions(index).models.map((m) => (
+                      <option key={m} value={m}>{m}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Size</label>
+                  <select
+                    value={item.size}
+                    onChange={(e) => handleFieldChange(index, "size", e.target.value)}
+                    className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-400 focus:outline-none"
+                  >
+                    <option value="">Select Size</option>
+                    {getFilteredOptions(index).sizes.map((s) => (
+                      <option key={s} value={s}>{s}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Price</label>
+                  <input
+                    type="text"
+                    value={item.price}
+                    readOnly
+                    className="w-full p-2 border border-gray-300 rounded-lg bg-gray-100 cursor-not-allowed"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Quantity</label>
+                  <input
+                    type="text"
+                    value={item.quantity}
+                    readOnly
+                    className="w-full p-2 border border-gray-300 rounded-lg bg-gray-100 cursor-not-allowed"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Return Quantity</label>
+                  <input
+                    type="number"
+                    value={item.returnQuantity}
+                    onChange={(e) => handleFieldChange(index, "returnQuantity", e.target.value)}
+                    className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-400 focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Return Price</label>
+                  <input
+                    type="number"
+                    value={item.returnPrice}
+                    onChange={(e) => handleFieldChange(index, "returnPrice", e.target.value)}
+                    className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-400 focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Discount</label>
+                  <input
+                    type="text"
+                    value={item.discount}
+                    readOnly
+                    className="w-full p-2 border border-gray-300 rounded-lg bg-gray-100 cursor-not-allowed"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Date</label>
+                  <input
+                    type="date"
+                    value={item.date}
+                    onChange={(e) => handleFieldChange(index, "date", e.target.value)}
+                    className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-400 focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Comment</label>
+                  <input
+                    type="text"
+                    value={item.comment}
+                    onChange={(e) => handleFieldChange(index, "comment", e.target.value)}
+                    className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-400 focus:outline-none"
+                  />
+                </div>
+              </div>
+              {formItems.length > 1 && (
+                <button
+                  onClick={() => removeItem(index)}
+                  className="mt-4 px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition"
+                >
+                  Remove Item
+                </button>
+              )}
             </div>
-          )}
-        </div>
-
-        <select
-          className="border border-gray-300 rounded px-3 py-2"
-          value={selectedCompany}
-          onChange={(e) => {
-            setSelectedCompany(e.target.value);
-            setSelectedBrand("");
-            setSelectedModel("");
-            setSelectedSize("");
-          }}
-        >
-          <option>Select Company</option>
-          {companies.map((c) => (
-            <option key={c}>{c}</option>
           ))}
-        </select>
+          <div className="flex justify-between">
+            <button
+              onClick={addItem}
+              className="mt-4 px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition"
+            >
+              Add Item
+            </button>
+            <button
+              type="submit"
+              className="mt-4 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition"
+            >
+              Return Tyres
+            </button>
+          </div>
+        </form>
+      </div>
 
-        <select
-          className="border border-gray-300 rounded px-3 py-2"
-          value={selectedBrand}
-          onChange={(e) => {
-            setSelectedBrand(e.target.value);
-            setSelectedModel("");
-            setSelectedSize("");
-          }}
-        >
-          <option>Select Brand</option>
-          {brands.map((b) => (
-            <option key={b}>{b}</option>
-          ))}
-        </select>
-
-        <select
-          className="border border-gray-300 rounded px-3 py-2"
-          value={selectedModel}
-          onChange={(e) => {
-            setSelectedModel(e.target.value);
-            setSelectedSize("");
-          }}
-        >
-          <option>Select Model</option>
-          {models.map((m) => (
-            <option key={m}>{m}</option>
-          ))}
-        </select>
-
-        <select
-          className="border border-gray-300 rounded px-3 py-2"
-          value={selectedSize}
-          onChange={(e) => setSelectedSize(e.target.value)}
-        >
-          <option>Select Size</option>
-          {sizes.map((s) => (
-            <option key={s}>{s}</option>
-          ))}
-        </select>
-
+      <div className="bg-white p-6 rounded-lg shadow-lg">
         <input
           type="text"
-          placeholder="Price"
-          value={price}
-          readOnly
-          className="border border-gray-300 bg-gray-100 rounded px-3 py-2"
-        />
-
-        <input
-          type="text"
-          placeholder="Quantity"
-          value={quantity}
-          readOnly
-          className="border border-gray-300 bg-gray-100 rounded px-3 py-2"
-        />
-        <input
-          type="number"
-          placeholder="Return Quantity"
-          value={returnQuantity}
-          onChange={(e) => setReturnQuantity(e.target.value)}
-          className="border border-gray-300 rounded px-3 py-2"
-        />
-        <input
-          type="number"
-          placeholder="Return Price"
-          value={manualReturnPrice}
-          onChange={(e) => setManualReturnPrice(e.target.value)}
-          className="border border-gray-300 rounded px-3 py-2"
-        />
-        <input
-          type="text"
-          placeholder="Discount"
-          value={discount}
-          readOnly
-          className="border border-gray-300 bg-gray-100 rounded px-3 py-2"
-        />
-        <input
-          type="text"
-          placeholder="Due Amount"
-          value={due}
-          readOnly
-          className="border border-gray-300 bg-gray-100 rounded px-3 py-2"
-        />
-        <input
-          type="date"
-          value={date}
-          onChange={(e) => setDate(e.target.value)}
-          className="border border-gray-300 rounded px-3 py-2"
-        />
-        <input
-          type="text"
-          placeholder="Add Comment"
-          value={comment}
-          onChange={(e) => setComment(e.target.value)}
-          className="border border-gray-300 rounded px-3 py-2 w-full"
-        />
-        <button
-          type="submit"
-          className="bg-blue-600 text-white font-semibold rounded px-6 py-2 hover:bg-blue-700 transition"
-        >
-          Return Tyre
-        </button>
-      </form>
-
-      <div className="flex justify-between">
-        <input
-          type="text"
-          placeholder="🔍 Search by customer name, company, brand, model, size..."
+          placeholder="Search returned items..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          className="mb-4 border border-gray-300 rounded px-3 py-2"
+          className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-400 focus:outline-none mb-4"
         />
-        <div className="flex gap-2 mb-4">
+        <div className="flex space-x-4 mb-6">
           <div className="relative">
             <DatePicker
               selected={startDate}
@@ -413,11 +485,11 @@ const Return = () => {
               startDate={startDate}
               endDate={endDate}
               placeholderText="Start Date"
-              className="border pl-10 pr-3 py-2 rounded focus:outline-none focus:ring-2 focus:ring-blue-400"
-              dateFormat="dd/MM/yyyy"
+              className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-400 focus:outline-none pl-10"
+              dateFormat="yyyy-MM-dd"
               isClearable
             />
-            <CalendarIcon className="w-5 h-5 text-gray-400 absolute left-3 top-2.5" />
+            <CalendarIcon className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
           </div>
           <div className="relative">
             <DatePicker
@@ -428,89 +500,75 @@ const Return = () => {
               endDate={endDate}
               minDate={startDate}
               placeholderText="End Date"
-              className="border pl-10 pr-3 py-2 rounded focus:outline-none focus:ring-2 focus:ring-blue-400"
-              dateFormat="dd/MM/yyyy"
+              className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-400 focus:outline-none pl-10"
+              dateFormat="yyyy-MM-dd"
               isClearable
             />
-            <CalendarIcon className="w-5 h-5 text-gray-400 absolute left-3 top-2.5" />
+            <CalendarIcon className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
           </div>
         </div>
-      </div>
 
-      <div className="overflow-x-auto">
-        <table className="w-full border-collapse text-sm text-left">
-          <thead>
-            <tr className="bg-gray-100">
-              <th className="py-2 px-4 font-semibold">Customer</th>
-              <th className="py-2 px-4 font-semibold">Company</th>
-              <th className="py-2 px-4 font-semibold">Brand</th>
-              <th className="py-2 px-4 font-semibold">Model</th>
-              <th className="py-2 px-4 font-semibold">Size</th>
-              <th className="py-2 px-4 font-semibold">Quantity</th>
-              <th className="py-2 px-4 font-semibold">Price</th>
-              <th className="py-2 px-4 font-semibold">Total Price</th>
-              <th className="py-2 px-4 font-semibold">Return Quantity</th>
-              <th className="py-2 px-4 font-semibold">Return Price</th>
-              <th className="py-2 px-4 font-semibold">Return Total Price</th>
-              <th className="py-2 px-4 font-semibold">Discount</th>
-              <th className="py-2 px-4 font-semibold">Due</th>
-              <th className="py-2 px-4 font-semibold">Date</th>
-              <th className="py-2 px-4 font-semibold min-w-[200px]">Comment</th>
-              <th className="py-2 px-4 font-semibold">Action</th>
-            </tr>
-          </thead>
-
-          <tbody>
-            {currentItems.length > 0 ? (
-              currentItems.map((t) => (
-                <tr key={t.id} className="border-b border-gray-200 hover:bg-gray-50">
-                  <td className="py-2 px-4">{t.customer}</td>
-                  <td className="py-2 px-4">{t.company}</td>
-                  <td className="py-2 px-4">{t.brand}</td>
-                  <td className="py-2 px-4">{t.model}</td>
-                  <td className="py-2 px-4">{t.size}</td>
-                  <td className="py-2 px-4">{t.quantity}</td>
-                  <td className="py-2 px-4">Rs. {t.price}</td>
-                  <td className="py-2 px-4">Rs. {t.totalPrice}</td>
-                  <td className="py-2 px-4">{t.returnQuantity}</td>
-                  <td className="py-2 px-4">Rs. {t.returnPrice}</td>
-                  <td className="py-2 px-4">Rs. {t.returnTotalPrice}</td>
-                  <td className="py-2 px-4">{`${t.discount || 0}`}</td>
-                  <td className="py-2 px-4">Rs. {t.due || 0}</td>
-                  <td className="py-2 px-4">{t.date}</td>
-                  <td className="py-2 px-4 min-w-[200px]">
-                    <textarea
-                      value={t.comment || ""}
-                      readOnly
-                      rows="2"
-                      className="border border-gray-300 p-2 rounded w-full min-w-[200px] resize-none"
-                    />
-                  </td>
-                  <td className="py-2 px-4">
-                    <button
-                      onClick={() => setSelectedReturn(t)}
-                      className="px-3 py-1 text-sm bg-yellow-100 text-yellow-800 border border-yellow-300 rounded hover:bg-yellow-200"
-                    >
-                      View
-                    </button>
+        <div className="overflow-x-auto">
+          <table className="min-w-full bg-white border border-gray-200">
+            <thead>
+              <tr className="bg-gray-50">
+                <th className="px-4 py-2 border text-left text-sm font-semibold text-gray-700">Customer</th>
+                <th className="px-4 py-2 border text-left text-sm font-semibold text-gray-700">Brands</th>
+                <th className="px-4 py-2 border text-left text-sm font-semibold text-gray-700">Models</th>
+                <th className="px-4 py-2 border text-left text-sm font-semibold text-gray-700">Sizes</th>
+                <th className="px-4 py-2 border text-left text-sm font-semibold text-gray-700">Quantities</th>
+                <th className="px-4 py-2 border text-left text-sm font-semibold text-gray-700">Return Quantities</th>
+                <th className="px-4 py-2 border text-left text-sm font-semibold text-gray-700">Prices</th>
+                <th className="px-4 py-2 border text-left text-sm font-semibold text-gray-700">Return Prices</th>
+                <th className="px-4 py-2 border text-left text-sm font-semibold text-gray-700">Return Total</th>
+                <th className="px-4 py-2 border text-left text-sm font-semibold text-gray-700">Discounts</th>
+                <th className="px-4 py-2 border text-left text-sm font-semibold text-gray-700">Comments</th>
+                <th className="px-4 py-2 border text-left text-sm font-semibold text-gray-700">Date</th>
+                <th className="px-4 py-2 border text-left text-sm font-semibold text-gray-700">Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {currentTransactions.length > 0 ? (
+                currentTransactions.map((transaction) => (
+                  <tr key={transaction.transactionId} className="hover:bg-gray-50">
+                    <td className="px-4 py-2 border text-gray-600">{transaction.customerName}</td>
+                    <td className="px-4 py-2 border text-gray-600">{transaction.brands}</td>
+                    <td className="px-4 py-2 border text-gray-600">{transaction.models}</td>
+                    <td className="px-4 py-2 border text-gray-600">{transaction.sizes}</td>
+                    <td className="px-4 py-2 border text-gray-600">{transaction.quantities}</td>
+                    <td className="px-4 py-2 border text-gray-600">{transaction.returnQuantities}</td>
+                    <td className="px-4 py-2 border text-gray-600">{transaction.prices}</td>
+                    <td className="px-4 py-2 border text-gray-600">{transaction.returnPrices}</td>
+                    <td className="px-4 py-2 border text-gray-600">Rs. {transaction.returnTotalPrices.toLocaleString()}</td>
+                    <td className="px-4 py-2 border text-gray-600">{transaction.discounts}</td>
+                    <td className="px-4 py-2 border text-gray-600">{transaction.comments}</td>
+                    <td className="px-4 py-2 border text-gray-600">{transaction.date}</td>
+                    <td className="px-4 py-2 border">
+                      <button
+                        onClick={() => setSelectedReturn(transaction)}
+                        className="px-3 py-1 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition"
+                      >
+                        View
+                      </button>
+                    </td>
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td colSpan="13" className="px-4 py-2 text-center text-gray-600">
+                    No returns found.
                   </td>
                 </tr>
-              ))
-            ) : (
-              <tr>
-                <td colSpan="16" className="text-center py-4 text-gray-500">
-                  No returns found.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-        <div className="p-4 flex justify-center gap-2">
+              )}
+            </tbody>
+          </table>
+        </div>
+        <div className="flex justify-center mt-4 space-x-2">
           {Array.from({ length: totalPages }, (_, i) => i + 1).map(number => (
             <button
               key={number}
               onClick={() => paginate(number)}
-              className={`px-3 py-1 rounded ${currentPage === number ? 'bg-blue-600 text-white' : 'bg-gray-200 hover:bg-gray-300'}`}
+              className={`px-3 py-1 rounded-lg ${currentPage === number ? 'bg-blue-500 text-white' : 'bg-gray-200 hover:bg-gray-300'}`}
             >
               {number}
             </button>
@@ -519,194 +577,133 @@ const Return = () => {
       </div>
 
       {selectedReturn && (
-  <div className="fixed inset-0 min-h-screen bg-black bg-opacity-50 flex justify-center items-center z-50 p-4">
-    <div className="bg-white rounded-2xl shadow-xl max-w-3xl w-full p-8 relative font-sans">
-      <style>
-        {`
-          @media print {
-            @page {
-              size: A4 portrait;
-              margin: 15mm; /* Page margin for A4 */
-            }
-            body {
-              background: white !important;
-              margin: 0 !important;
-              -webkit-print-color-adjust: exact;
-              print-color-adjust: exact;
-            }
-            .print-only-container {
-              width: 180mm !important; /* Adjusted to fit within A4 after page margins */
-              max-width: 180mm !important;
-              padding: 10mm !important; /* Consistent padding for print */
-              margin: 0 auto !important; /* Centered on the page */
-              border: none !important;
-              border-radius: 0 !important;
-              box-shadow: none !important;
-              background: white !important;
-            }
-            .invoice-header {
-              background: #2563eb !important; /* Fallback for gradient */
-              padding: 8mm !important;
-              margin-bottom: 5mm !important;
-              border-radius: 0 !important;
-              color: white !important;
-            }
-            .invoice-section {
-              margin-bottom: 5mm !important;
-            }
-            .invoice-section h3 {
-              font-size: 11pt !important;
-              padding-bottom: 2mm !important;
-              margin-bottom: 3mm !important;
-              border-bottom: 1px solid #e5e7eb !important;
-            }
-            .invoice-grid {
-              display: grid !important;
-              grid-template-columns: repeat(2, 1fr) !important;
-              gap: 5mm !important;
-              font-size: 9pt !important;
-            }
-            .invoice-grid p {
-              margin: 0 !important;
-              line-height: 1.3 !important;
-            }
-            .invoice-note {
-              font-size: 8pt !important;
-              color: #6b7280 !important;
-              text-align: center !important;
-              margin-top: 5mm !important;
-              margin-bottom: 0 !important;
-            }
-            .screen-only {
-              display: block !important;
-            }
-            .print-only {
-              display: none !important;
-            }
-            @media print {
-              .screen-only {
-                display: none !important;
-              }
-              .print-only {
-                display: block !important;
-              }
-              .print-only-container * {
-                box-sizing: border-box !important;
-              }
-            }
-          }
-        `}
-      </style>
-
-      {/* Custom Print Function */}
-      {(() => {
-        const handlePrint = () => {
-          // Create a temporary print-only container
-          const printContent = document.createElement('div');
-          printContent.className = 'print-only print-only-container';
-
-          // Clone the invoice content (without screen-only elements)
-          const invoiceContent = document.querySelector('.print-content').cloneNode(true);
-          // Remove screen-only elements (like buttons) from the clone
-          invoiceContent.querySelectorAll('.screen-only').forEach(el => el.remove());
-          printContent.appendChild(invoiceContent);
-
-          // Append to body for printing
-          document.body.appendChild(printContent);
-
-          // Hide everything else
-          document.querySelectorAll('body > *:not(.print-only)').forEach(el => {
-            el.style.display = 'none';
-          });
-
-          // Trigger print
-          window.print();
-
-          // Restore visibility and cleanup
-          document.querySelectorAll('body > *:not(.print-only)').forEach(el => {
-            el.style.display = '';
-          });
-          document.body.removeChild(printContent);
-        };
-
-        return (
-          <div className="print-content">
-            {/* Header */}
-            <div className="invoice-header bg-gradient-to-r from-blue-600 to-blue-800 text-white p-6 rounded-t-2xl flex justify-between items-center">
-              <h2 className="text-3xl font-bold print:text-xl">Srhad Tyre Treaders</h2>
-              <div className="text-sm print:text-[9pt]">
-                <p>Date: <time>{selectedReturn.date}</time></p>
-              </div>
-            </div>
-
-            {/* Invoice Details */}
-            <div className="invoice-section mb-6">
-              <div className="invoice-grid grid grid-cols-1 md:grid-cols-2 gap-8 text-gray-700">
-                <div>
-                  <h3 className="text-lg font-semibold text-gray-800 border-b border-gray-200 pb-2 mb-4">Customer Details</h3>
-                  <p><span className="font-medium">Name:</span> {selectedReturn.customer || 'N/A'}</p>
-                </div>
-                <div>
-                  <h3 className="text-lg font-semibold text-gray-800 border-b border-gray-200 pb-2 mb-4">Tire Details</h3>
-                  <p><span className="font-medium">Brand:</span> {selectedReturn.brand}</p>
-                  <p><span className="font-medium">Model:</span> {selectedReturn.model}</p>
-                  <p><span className="font-medium">Size:</span> {selectedReturn.size}</p>
+        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center z-50 animate-fade-in">
+          <div className="bg-white p-8 rounded-xl shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-y-auto">
+            <div className="invoice-container">
+              <div className="header text-center mb-6 border-b-2 border-blue-600 pb-4">
+                <h1 className="text-3xl font-bold text-blue-600">Srhad Tyres Traders</h1>
+                <div className="invoice-info text-gray-600 mt-2 flex justify-between">
+                  <p>Return Invoice</p>
+                  <p>Date: {selectedReturn.date}</p>
                 </div>
               </div>
-            </div>
-
-            {/* Pricing Summary */}
-            <div className="invoice-section mb-6">
-              <h3 className="text-lg font-semibold text-gray-800 border-b border-gray-200 pb-2 mb-4">Pricing Summary</h3>
-              <div className="invoice-grid grid grid-cols-2 gap-x-6 gap-y-3 text-gray-700">
-                <p className="font-medium">Original Quantity:</p>
-                <p>{selectedReturn.quantity}</p>
-                <p className="font-medium">Returned Quantity:</p>
-                <p>{selectedReturn.returnQuantity}</p>
-                <p className="font-medium">Price per Tire:</p>
-                <p>Rs. {selectedReturn.price}</p>
-                <p className="font-medium">Return Price per Tire:</p>
-                <p>Rs. {selectedReturn.returnPrice}</p>
-                <p className="font-medium">Discount:</p>
-                <p>Rs. {selectedReturn.discount || 0}</p>
-                <p className="font-medium">Due Amount:</p>
-                <p>Rs. {selectedReturn.due || 0}</p>
-                <p className="font-medium text-lg text-gray-800 print:text-base">Total Return Amount:</p>
-                <p className="font-medium text-lg text-gray-800 print:text-base">Rs. {selectedReturn.returnTotalPrice}</p>
+              <div className="section mb-6">
+                <h3 className="section-title text-xl font-semibold text-blue-600 mb-3">Customer Details</h3>
+                <div className="customer-details grid gap-2 text-gray-700">
+                  <p><strong>Name:</strong> {selectedReturn.customerName || 'N/A'}</p>
+                </div>
+              </div>
+              <div className="section">
+                <h3 className="section-title text-xl font-semibold text-blue-600 mb-3">Item Details</h3>
+                <div className="overflow-x-auto">
+                  <table className="w-full border-collapse">
+                    <thead>
+                      <tr className="bg-gray-50">
+                        <th className="border border-gray-200 px-4 py-2 text-left font-semibold text-gray-700">Brand</th>
+                        <th className="border border-gray-200 px-4 py-2 text-left font-semibold text-gray-700">Model</th>
+                        <th className="border border-gray-200 px-4 py-2 text-left font-semibold text-gray-700">Size</th>
+                        <th className="border border-gray-200 px-4 py-2 text-left font-semibold text-gray-700">Original Qty</th>
+                        <th className="border border-gray-200 px-4 py-2 text-left font-semibold text-gray-700">Return Qty</th>
+                        <th className="border border-gray-200 px-4 py-2 text-left font-semibold text-gray-700">Price</th>
+                        <th className="border border-gray-200 px-4 py-2 text-left font-semibold text-gray-700">Return Price</th>
+                        <th className="border border-gray-200 px-4 py-2 text-left font-semibold text-gray-700">Discount</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {selectedReturn.items.map((item, idx) => (
+                        <tr key={idx} className="hover:bg-gray-50">
+                          <td className="border border-gray-200 px-4 py-2 text-gray-600">{item.brand}</td>
+                          <td className="border border-gray-200 px-4 py-2 text-gray-600">{item.model}</td>
+                          <td className="border border-gray-200 px-4 py-2 text-gray-600">{item.size}</td>
+                          <td className="border border-gray-200 px-4 py-2 text-gray-600">{item.quantity}</td>
+                          <td className="border border-gray-200 px-4 py-2 text-gray-600">{item.returnQuantity}</td>
+                          <td className="border border-gray-200 px-4 py-2 text-gray-600">Rs. {item.price.toFixed(2)}</td>
+                          <td className="border border-gray-200 px-4 py-2 text-gray-600">Rs. {item.returnPrice.toFixed(2)}</td>
+                          <td className="border border-gray-200 px-4 py-2 text-gray-600">Rs. {item.discount || 0}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+              <div className="section">
+                <div className="total-section flex justify-end">
+                  <div className="total-box bg-gray-50 p-4 rounded-lg w-80">
+                    <p className="text-gray-700 font-bold">Total: Rs. {selectedReturn.returnTotalPrices.toLocaleString()}</p>
+                  </div>
+                </div>
+              </div>
+              <div className="footer text-center mt-6 border-t border-gray-200 pt-4 text-gray-600">
+                <p className="font-semibold">Thank you for your business!</p>
+                <p>Phone: 0307-7717613 | Sher Shah Road Near Masjid Al Qadir Dera Adda, Multan, Pakistan</p>
+                <p>Terms: Payment due within 30 days. All sales are final.</p>
+                <p className="status font-semibold text-green-600">Status: Returned</p>
               </div>
             </div>
-
-            {/* Note */}
-            <div className="invoice-note text-center mb-6">
-              <p className="text-sm text-gray-500">Note: We provide a wide range of imported tires and rims for all types of vehicles.</p>
-            </div>
-
-            {/* Buttons (Hidden on Print) */}
-            <div className="screen-only flex justify-between items-center text-gray-600 text-sm mt-6">
-              <p>Status: <span className="font-semibold text-green-600">Returned</span></p>
-              <div className="flex gap-3">
-                <button
-                  onClick={handlePrint}
-                  className="px-6 py-2 text-gray-700 border border-gray-300 rounded-lg bg-gray-100 hover:bg-gray-200 transition"
-                  aria-label="Print Invoice"
-                >
-                  Print Invoice
-                </button>
-                <button
-                  onClick={() => setSelectedReturn(null)}
-                  className="px-6 py-2 text-gray-700 border border-gray-300 rounded-lg bg-gray-100 hover:bg-gray-200 transition"
-                  aria-label="Close Invoice"
-                >
-                  Close
-                </button>
-              </div>
+            <div className="flex justify-end space-x-4 mt-6">
+              <button
+                onClick={() => {
+                  const printContent = document.querySelector('.invoice-container').innerHTML;
+                  const printWindow = window.open("", "_blank", "height=600,width=800");
+                  if (!printWindow) {
+                    toast.error("Please allow pop-ups for this site to enable printing.");
+                    return;
+                  }
+                  printWindow.document.write(`
+                    <html>
+                      <head>
+                        <title>Print Return Invoice</title>
+                        <style>
+                          @media print {
+                            @page { margin: 20mm; }
+                            body { font-family: 'Helvetica Neue', Arial, sans-serif; margin: 0; color: #1f2937; font-size: 12pt; }
+                            .invoice-container { max-width: 800px; margin: 0 auto; padding: 20px; background: #fff; }
+                            .header { text-align: center; margin-bottom: 20px; border-bottom: 2px solid #1e40af; padding-bottom: 10px; }
+                            .header h1 { font-size: 24pt; font-weight: 700; color: #1e40af; margin: 0; }
+                            .header .invoice-info { color: #64748b; margin-top: 10px; }
+                            .section { margin-bottom: 20px; }
+                            .section-title { font-size: 16pt; font-weight: 600; color: #1e40af; margin-bottom: 10px; }
+                            .customer-details { display: grid; grid-template-columns: 1fr; gap: 5px; }
+                            .customer-details p { margin: 0; color: #374151; }
+                            table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
+                            th, td { border: 1px solid #e2e8f0; padding: 8px 12px; text-align: left; }
+                            th { background-color: #f8fafc; font-weight: 600; color: #1f2937; }
+                            td { color: #374151; }
+                            .total-section { display: flex; justify-content: flex-end; }
+                            .total-box { width: 300px; background: #f8fafc; padding: 10px; border-radius: 8px; }
+                            .total-box p { margin: 5px 0; color: #374151; font-weight: 600; font-size: 14pt; color: #1e40af; }
+                            .footer { text-align: center; margin-top: 20px; color: #64748b; font-size: 10pt; border-top: 1px solid #e2e8f0; padding-top: 10px; }
+                            .status { font-weight: 600; color: #059669; }
+                            .no-page-break { page-break-inside: avoid; }
+                          }
+                        </style>
+                      </head>
+                      <body>
+                        ${printContent}
+                      </body>
+                    </html>
+                  `);
+                  printWindow.document.close();
+                  printWindow.focus();
+                  setTimeout(() => {
+                    printWindow.print();
+                    printWindow.close();
+                  }, 500);
+                }}
+                className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition"
+              >
+                Print Invoice
+              </button>
+              <button
+                onClick={() => setSelectedReturn(null)}
+                className="px-4 py-2 bg-gray-300 text-gray-800 rounded-lg hover:bg-gray-400 transition"
+              >
+                Close
+              </button>
             </div>
           </div>
-        );
-      })()}
-    </div>
-  </div>
-)}
+        </div>
+      )}
     </div>
   );
 };

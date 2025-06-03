@@ -10,9 +10,20 @@ import { CalendarIcon } from '@heroicons/react/24/outline';
 
 Modal.setAppElement('#root');
 
+// Helper function to safely parse dates
+const parseDateSafely = (date) => {
+  if (date instanceof Date) return date;
+  if (typeof date === 'string') {
+    const parsed = new Date(date);
+    return isNaN(parsed.getTime()) ? new Date() : parsed; // Fallback to current date if invalid
+  }
+  return new Date(); // Fallback if date is undefined/null
+};
+
 const CustomerLedger = () => {
   const [sellData, setSellData] = useState([]);
   const [customerDetails, setCustomerDetails] = useState([]);
+  const [brandDetails, setBrandDetails] = useState([]);
   const [ledgerEntries, setLedgerEntries] = useState([]);
   const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -24,11 +35,14 @@ const CustomerLedger = () => {
   const [rowsPerPage] = useState(5);
   const [customerFormData, setCustomerFormData] = useState({
     customerName: '',
+    brand: '',
+    size: '',
     totalBrands: 0,
     totalItems: 0,
     totalCost: '',
     totalPaid: '',
     due: '',
+    brandDue: '',
     paymentMethod: '',
     bankName: '',
   });
@@ -56,6 +70,11 @@ const CustomerLedger = () => {
       setCustomerDetails(detailsList);
     });
 
+    const unsubscribeBrandDetails = onSnapshot(collection(db, 'brandDetails'), (snapshot) => {
+      const brandList = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setBrandDetails(brandList);
+    });
+
     const unsubscribeLedger = onSnapshot(collection(db, 'customerLedgerEntries'), (snapshot) => {
       const ledgerList = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       setLedgerEntries(ledgerList);
@@ -64,6 +83,7 @@ const CustomerLedger = () => {
     return () => {
       unsubscribeSell();
       unsubscribeCustomerDetails();
+      unsubscribeBrandDetails();
       unsubscribeLedger();
     };
   }, []);
@@ -76,7 +96,7 @@ const CustomerLedger = () => {
       if (!customerMap[customer]) {
         customerMap[customer] = { totalItems: 0, totalCost: 0, brands: {} };
       }
-      const itemDate = item.date instanceof Date ? item.date : new Date(item.date);
+      const itemDate = parseDateSafely(item.date);
       customerMap[customer].totalItems += item.quantity;
       customerMap[customer].totalCost += item.price * item.quantity;
       if (!customerMap[customer].brands[item.brand]) {
@@ -85,7 +105,7 @@ const CustomerLedger = () => {
       customerMap[customer].brands[item.brand].totalItems += item.quantity;
       customerMap[customer].brands[item.brand].totalCost += item.price * item.quantity;
       if (item.size) customerMap[customer].brands[item.brand].sizes.add(item.size);
-      if (item.date) customerMap[customer].brands[item.brand].dates.add(item.date.toISOString().split('T')[0]);
+      if (item.date) customerMap[customer].brands[item.brand].dates.add(itemDate.toISOString().split('T')[0]);
     });
 
     return Object.keys(customerMap).map(customer => {
@@ -104,26 +124,9 @@ const CustomerLedger = () => {
     });
   }, [sellData, customerDetails]);
 
-  const filteredCustomers = useMemo(() => {
-    if (!searchQuery.trim()) return customerSummary;
-
-    const queries = searchQuery.toLowerCase().split(/\s+/).filter(q => q);
-
-    return customerSummary.filter(item => {
-      return queries.every(query => {
-        const numQuery = parseFloat(query);
-        const isNumeric = !isNaN(numQuery);
-
-        return (
-          item.customer.toLowerCase().includes(query) ||
-          (isNumeric && Math.abs(item.totalItems - numQuery) <= 10) ||
-          (isNumeric && Math.abs(item.totalCost - numQuery) <= 1000) ||
-          (isNumeric && Math.abs(item.totalPaid - numQuery) <= 1000) ||
-          (isNumeric && Math.abs(item.due - numQuery) <= 1000)
-        );
-      });
-    });
-  }, [customerSummary, searchQuery]);
+  const filteredCustomers = customerSummary.filter(item =>
+    item.customer.toLowerCase().includes(searchQuery.toLowerCase())
+  );
 
   const getSaleSummary = (customerName) => {
     const customer = customerSummary.find(item => item.customer === customerName);
@@ -134,7 +137,7 @@ const CustomerLedger = () => {
     sellData
       .filter(item => (item.customerName || 'N/A') === customerName)
       .forEach(item => {
-        const itemDate = item.date instanceof Date ? item.date : new Date(item.date);
+        const itemDate = parseDateSafely(item.date);
         const startDate = saleFilterDates.startDate;
         const endDate = saleFilterDates.endDate;
         const brand = item.brand;
@@ -152,22 +155,36 @@ const CustomerLedger = () => {
             totalItems: 0,
             totalCost: 0,
             dates: new Set(),
+            earliestDate: itemDate, // Track the earliest date for sorting
           };
         }
 
         saleSizeMap[key].totalItems += item.quantity;
         saleSizeMap[key].totalCost += item.price * item.quantity;
-        if (item.date) saleSizeMap[key].dates.add(item.date.toISOString().split('T')[0]);
-      });
+        if (item.date) saleSizeMap[key].dates.add(itemDate.toISOString().split('T')[0]);
+        // Update earliest date if current item date is older
+        if (itemDate < saleSizeMap[key].earliestDate) {
+          saleSizeMap[key].earliestDate = itemDate;
+        }
+    });
 
     const saleSummary = Object.values(saleSizeMap)
-      .map(entry => ({
-        brand: entry.brand,
-        totalItems: entry.totalItems,
-        totalCost: entry.totalCost,
-        sizes: entry.size,
-        date: Array.from(entry.dates).sort((a, b) => new Date(b) - new Date(a)).join(', ') || 'N/A',
-      }))
+      .map(entry => {
+        const details = brandDetails.find(detail => item.customerName === customerName && detail.brand === entry.brand && detail.size === entry.size) || {};
+        const totalCost = entry.totalCost;
+        const totalPaid = parseFloat(details.totalPaid) || 0;
+        const due = (totalCost - entry.totalCost).toFixed(2);
+        return {
+          brand: entry.brand,
+          totalItems: entry.totalItems,
+          totalCost: totalCost.toFixed(2),
+          totalPaid,
+          due: parseFloat(due) >= 0 ? parseFloat(due) : 0,
+          sizes: entry.size,
+          date: Array.from(entry.dates).sort((a, b) => parseDateSafely(a) - parseDateSafely(b)).join(', ') || 'N/A', // Sort dates within the string
+          earliestDate: entry.earliestDate, // For sorting the entries
+        };
+      })
       .filter(entry => {
         const query = saleSearchQuery.toLowerCase();
         return (
@@ -175,7 +192,8 @@ const CustomerLedger = () => {
           entry.sizes.toLowerCase().includes(query)
         );
       })
-      .sort((a, b) => new Date(b.date.split(',')[0]) - new Date(a.date.split(',')[0]));
+      // Sort by earliest date in ascending order (oldest to newest)
+      .sort((a, b) => a.earliestDate - b.earliestDate);
 
     const indexOfLastRow = currentPage * rowsPerPage;
     const indexOfFirstRow = indexOfLastRow - rowsPerPage;
@@ -212,27 +230,60 @@ const CustomerLedger = () => {
 
   const getLedgerForCustomer = (customerName) => {
     const customer = customerSummary.find(item => item.customer === customerName);
-    if (!customer) return [];
+    if (!customer) return { ledgerData: [], totalDebit: 0, totalCredit: 0 };
 
-    const fixedBalance = customer.totalCost || 0;
-
+    let runningBalance = 0;
     const ledgerData = ledgerEntries
       .filter(entry => entry.customerName === customerName)
       .filter(entry => {
-        const entryDate = new Date(entry.date);
+        const entryDate = parseDateSafely(entry.date);
         const { startDate, endDate } = ledgerFilterDates;
         if (startDate && endDate) {
           return entryDate >= startDate && entryDate <= endDate;
         }
         return true;
       })
-      .sort((a, b) => new Date(b.date) - new Date(a.date))
-      .map(entry => ({
-        ...entry,
-        balance: fixedBalance.toFixed(2),
-      }));
+      // Sort in ascending order (oldest to newest) and calculate running balance
+      .sort((a, b) => parseDateSafely(a.date) - parseDateSafely(b.date))
+      .map(entry => {
+        const debit = parseFloat(entry.debit) || 0;
+        const credit = parseFloat(entry.credit) || 0;
+        runningBalance += debit - credit;
+        return {
+          ...entry,
+          balance: runningBalance.toFixed(2),
+        };
+      });
 
-    return ledgerData;
+    const totalDebit = ledgerData.reduce((sum, entry) => sum + (parseFloat(entry.debit) || 0), 0);
+    const totalCredit = ledgerData.reduce((sum, entry) => sum + (parseFloat(entry.credit) || 0), 0);
+
+    return { ledgerData, totalDebit, totalCredit };
+  };
+
+  const getBrandsForCustomer = (customerName) => {
+    const customer = customerSummary.find(item => item.customer === customerName);
+    return customer ? Object.keys(customer.brands).sort() : [];
+  };
+
+  const getSizesForBrand = (customerName, brand) => {
+    const customer = customerSummary.find(item => item.customer === customerName);
+    return customer && customer.brands[brand] ? Array.from(customer.brands[brand].sizes).sort() : [];
+  };
+
+  const getBrandSizeMetrics = (customerName, brand, size) => {
+    let totalItems = 0;
+    let totalCost = 0;
+    sellData
+      .filter(item => (item.customerName || 'N/A') === customerName && item.brand === brand && item.size === size)
+      .forEach(item => {
+        totalItems += item.quantity;
+        totalCost += item.price * item.quantity;
+      });
+    const brandDetail = brandDetails.find(detail => detail.customerName === customerName && detail.brand === brand && detail.size === size) || {};
+    const totalPaid = parseFloat(brandDetail.totalPaid) || 0;
+    const due = (totalCost - totalPaid).toFixed(2);
+    return { totalItems, totalCost: totalCost.toFixed(2), totalPaid, totalPaid };
   };
 
   const openModal = (customer) => {
@@ -254,7 +305,19 @@ const CustomerLedger = () => {
 
   const closeAddCustomerModal = () => {
     setAddCustomerModalIsOpen(false);
-    setCustomerFormData({ customerName: '', totalBrands: 0, totalItems: 0, totalCost: '', totalPaid: '', due: '', paymentMethod: '', bankName: '' });
+    setCustomerFormData({
+      customerName: '',
+      brand: '',
+      size: '',
+      totalBrands: 0,
+      totalItems: '',
+      totalCost: '',
+      totalPaid: '',
+      due: '',
+      brandDue: '',
+      paymentMethod: '',
+      bankName: '',
+    });
   };
 
   const openLedgerModal = (customer) => {
@@ -272,15 +335,37 @@ const CustomerLedger = () => {
     const updatedFormData = { ...customerFormData, [name]: value };
 
     if (name === 'customerName') {
+      updatedFormData.brand = '';
+      updatedFormData.size = '';
       updatedFormData.totalBrands = getTotalBrands(value);
+      updatedFormData.totalItems = 0;
+      updatedFormData.totalCost = '';
+      updatedFormData.totalPaid = '';
+      updatedFormData.due = '';
+      updatedFormData.brandDue = '';
       updatedFormData.paymentMethod = '';
       updatedFormData.bankName = '';
       const customerData = customerSummary.find(item => item.customer === value);
       const customerDetailsData = customerDetails.find(detail => detail.customerName === value) || {};
-      updatedFormData.totalPaid = customerDetailsData.totalPaid || '';
       updatedFormData.totalItems = customerData ? customerData.totalItems : 0;
       updatedFormData.totalCost = customerData ? customerData.totalCost.toFixed(2) : '';
       updatedFormData.due = customerData ? (customerData.totalCost - (parseFloat(customerDetailsData.totalPaid) || 0)).toFixed(2) : '';
+    }
+
+    if (name === 'brand') {
+      updatedFormData.size = '';
+      updatedFormData.totalItems = 0;
+      updatedFormData.totalCost = '';
+      updatedFormData.totalPaid = '';
+      updatedFormData.brandDue = '';
+    }
+
+    if (name === 'size') {
+      const metrics = getBrandSizeMetrics(updatedFormData.customerName, updatedFormData.brand, value);
+      updatedFormData.totalItems = metrics.totalItems;
+      updatedFormData.totalCost = metrics.totalCost;
+      updatedFormData.totalPaid = metrics.totalPaid;
+      updatedFormData.brandDue = metrics.due;
     }
 
     if (name === 'paymentMethod') {
@@ -288,11 +373,13 @@ const CustomerLedger = () => {
     }
 
     if (name === 'totalPaid') {
-      const customerData = customerSummary.find(item => item.customer === updatedFormData.customerName);
-      const totalCost = customerData?.totalCost || 0;
-      const existingTotalPaid = customerDetails.find(detail => detail.customerName === updatedFormData.customerName)?.totalPaid || 0;
+      const metrics = getBrandSizeMetrics(updatedFormData.customerName, updatedFormData.brand, updatedFormData.size);
+      const totalCost = parseFloat(metrics.totalCost) || 0;
+      const existingTotalPaid = parseFloat(metrics.totalPaid) || 0;
       const newPayment = parseFloat(value) || 0;
-      updatedFormData.due = (totalCost - (existingTotalPaid + newPayment)).toFixed(2);
+      const customerData = customerSummary.find(item => item.customer === updatedFormData.customerName);
+      updatedFormData.due = customerData ? (customerData.totalCost - (parseFloat(customerDetails.find(detail => detail.customerName === updatedFormData.customerName)?.totalPaid || 0) + newPayment)).toFixed(2) : '';
+      updatedFormData.brandDue = (totalCost - (existingTotalPaid + newPayment)).toFixed(2);
     }
 
     setCustomerFormData(updatedFormData);
@@ -300,10 +387,10 @@ const CustomerLedger = () => {
 
   const handleAddCustomerDetails = async (e) => {
     e.preventDefault();
-    const { customerName, totalPaid, due, paymentMethod, bankName } = customerFormData;
+    const { customerName, brand, size, totalPaid, paymentMethod, bankName } = customerFormData;
 
-    if (!customerName || !totalPaid || !paymentMethod) {
-      toast.error('Please fill all required fields (Customer Name, Total Paid, Payment Method)');
+    if (!customerName || !brand || !size || !totalPaid || !paymentMethod) {
+      toast.error('Please fill all required fields (Customer Name, Brand, Size, Total Paid, Payment Method)');
       return;
     }
 
@@ -312,8 +399,9 @@ const CustomerLedger = () => {
       return;
     }
 
-    const customerExists = customerDetails.find(detail => detail.customerName === customerName);
     const customerData = customerSummary.find(item => item.customer === customerName);
+    const brandDetailExists = brandDetails.find(detail => detail.customerName === customerName && detail.brand === brand && detail.size === size);
+    const customerExists = customerDetails.find(detail => detail.customerName === customerName);
 
     if (!customerData) {
       toast.error('Customer not found in sales data');
@@ -321,54 +409,101 @@ const CustomerLedger = () => {
     }
 
     const todayDate = new Date().toISOString().split('T')[0];
-    const narration = paymentMethod === 'Bank' ? `Payment via ${bankName}` : `Payment via ${paymentMethod}`;
+    let narration = '';
+    let debit = 0;
+    let credit = 0;
+
+    if (paymentMethod === 'Bank') {
+      narration = `ONLINE bY ${bankName}`;
+      credit = parseFloat(totalPaid) || 0;
+    } else if (paymentMethod === 'Debit Card') {
+      const latestSale = sellData
+        .filter(item => (item.customerName || 'N/A') === customerName && item.brand === brand && item.size === size)
+        .sort((a, b) => parseDateSafely(b.date) - parseDateSafely(a.date))[0];
+      if (latestSale) {
+        narration = `${latestSale.size || 'N/A'} ${latestSale.model || 'N/A'} ${latestSale.brand || 'N/A'} ${latestSale.quantity || 0}X${latestSale.price || 0}`;
+      } else {
+        narration = 'Debit Payment';
+      }
+      debit = parseFloat(totalPaid) || 0;
+    }
 
     try {
-      if (customerExists) {
-        const customerDoc = doc(db, 'customerDetails', customerExists.id);
-        const existingTotalPaid = parseFloat(customerExists.totalPaid) || 0;
+      if (brandDetailExists) {
+        const brandDoc = doc(db, 'brandDetails', brandDetailExists.id);
+        const existingTotalPaid = parseFloat(brandDetailExists.totalPaid) || 0;
         const newTotalPaid = existingTotalPaid + (parseFloat(totalPaid) || 0);
-        const newDue = (customerData.totalCost - newTotalPaid).toFixed(2);
-        await updateDoc(customerDoc, {
+        const brandTotalCost = parseFloat(customerFormData.totalCost) || 0;
+        const newDue = (brandTotalCost - newTotalPaid).toFixed(2);
+        await updateDoc(brandDoc, {
           customerName,
+          brand,
+          size,
           totalPaid: newTotalPaid,
           due: parseFloat(newDue) >= 0 ? parseFloat(newDue) : 0,
           paymentMethod,
           bankName: paymentMethod === 'Bank' ? bankName : '',
           date: todayDate,
-          totalItems: customerData.totalItems,
-          totalCost: customerData.totalCost,
+          totalItems: customerFormData.totalItems,
+          totalCost: parseFloat(customerFormData.totalCost),
         });
-        await addDoc(collection(db, 'customerLedgerEntries'), {
-          customerName,
-          invoiceNumber: `RV${Date.now()}`,
-          date: todayDate,
-          narration,
-          debit: paymentMethod === 'Debit Card' ? parseFloat(totalPaid) || 0 : 0,
-          credit: paymentMethod === 'Bank' ? parseFloat(totalPaid) || 0 : 0,
-        });
-        toast.success('Customer details updated successfully');
       } else {
-        await addDoc(collection(db, 'customerDetails'), {
+        const brandTotalCost = parseFloat(customerFormData.totalCost) || 0;
+        const newDue = (brandTotalCost - parseFloat(totalPaid)).toFixed(2);
+        await addDoc(collection(db, 'brandDetails'), {
           customerName,
+          brand,
+          size,
           totalPaid: parseFloat(totalPaid),
-          due: parseFloat(due),
+          due: parseFloat(newDue) >= 0 ? parseFloat(newDue) : 0,
           paymentMethod,
           bankName: paymentMethod === 'Bank' ? bankName : '',
           date: todayDate,
-          totalItems: customerData.totalItems,
-          totalCost: customerData.totalCost,
+          totalItems: customerFormData.totalItems,
+          totalCost: parseFloat(customerFormData.totalCost),
         });
-        await addDoc(collection(db, 'customerLedgerEntries'), {
-          customerName,
-          invoiceNumber: `RV${Date.now()}`,
-          date: todayDate,
-          narration,
-          debit: paymentMethod === 'Debit Card' ? parseFloat(totalPaid) || 0 : 0,
-          credit: paymentMethod === 'Bank' ? parseFloat(totalPaid) || 0 : 0,
-        });
-        toast.success('Customer details added successfully');
       }
+
+      let customerTotalPaid = 0;
+      brandDetails
+        .filter(detail => detail.customerName === customerName)
+        .forEach(detail => {
+          customerTotalPaid += parseFloat(detail.totalPaid) || 0;
+        });
+      customerTotalPaid += parseFloat(totalPaid) || 0;
+
+      if (customerExists) {
+        const customerDoc = doc(db, 'customerDetails', customerExists.id);
+        const customerTotalCost = customerData.totalCost;
+        const customerDue = (customerTotalCost - customerTotalPaid).toFixed(2);
+        await updateDoc(customerDoc, {
+          customerName,
+          totalPaid: customerTotalPaid,
+          due: parseFloat(customerDue) >= 0 ? parseFloat(customerDue) : 0,
+          date: todayDate,
+        });
+      } else {
+        const customerTotalCost = customerData.totalCost;
+        const customerDue = (customerTotalCost - customerTotalPaid).toFixed(2);
+        await addDoc(collection(db, 'customerDetails'), {
+          customerName,
+          totalPaid: customerTotalPaid,
+          due: parseFloat(customerDue) >= 0 ? parseFloat(customerDue) : 0,
+          date: todayDate,
+        });
+      }
+
+      await addDoc(collection(db, 'customerLedgerEntries'), {
+        customerName,
+        brand,
+        size,
+        invoiceNumber: `RV${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+        date: todayDate,
+        narration,
+        debit,
+        credit,
+        createdAt: new Date(),
+      });
 
       sellData
         .filter(item => (item.customerName || 'N/A') === customerName && item.invoiceNumber)
@@ -377,15 +512,19 @@ const CustomerLedger = () => {
           if (!existingLedgerEntry) {
             await addDoc(collection(db, 'customerLedgerEntries'), {
               customerName,
+              brand: item.brand,
+              size: item.size,
               invoiceNumber: item.invoiceNumber,
-              date: item.date instanceof Date ? item.date.toISOString().split('T')[0] : item.date,
-              narration: item.narration || `${item.size} ${item.brand} Qty_${item.quantity}_Rate_${item.price}`,
+              date: parseDateSafely(item.date).toISOString().split('T')[0],
+              narration: `${item.size || 'N/A'} ${item.brand || 'N/A'} Qty_${item.quantity}_Rate_${item.price}`,
               debit: item.price * item.quantity,
               credit: 0,
+              createdAt: new Date(),
             });
           }
         });
 
+      toast.success('Customer details saved successfully');
       closeAddCustomerModal();
     } catch (error) {
       toast.error('Error saving details');
@@ -399,15 +538,12 @@ const CustomerLedger = () => {
       return;
     }
 
-    const ledgerData = getLedgerForCustomer(selectedCustomer.customer);
-    const customer = customerSummary.find(item => item.customer === selectedCustomer.customer);
+    const { ledgerData, totalDebit, totalCredit } = getLedgerForCustomer(selectedCustomer.customer);
 
-    if (!customer) {
-      toast.error('Customer data not found');
+    if (!ledgerData.length) {
+      toast.error('No ledger data available for printing');
       return;
     }
-
-    const fixedBalance = customer.totalCost || 0;
 
     const printWindow = window.open('', '_blank');
     printWindow.document.write(`
@@ -417,28 +553,35 @@ const CustomerLedger = () => {
           <style>
             body { font-family: Arial, sans-serif; margin: 20px; }
             .container { max-width: 1200px; margin: 0 auto; padding: 20px; border: 2px solid #000; border-radius: 10px; }
-            h1 { text-align: center; color: #1e40af; font-size: 24px; }
             .header { margin-bottom: 20px; text-align: center; }
-            .header p { margin: 5px 0; font-size: 14px; }
+            .header .title { font-size: 24px; font-weight: bold; }
+            .header .party { font-size: 16px; margin: 5px 0; }
+            .header .account { font-size: 14px; margin: 5px 0; }
+            .header .date-range { font-size: 14px; margin: 5px 0; }
+            .header .date { font-size: 14px; margin: 5px 0; text-align: right; }
+            .header .page { font-size: 12px; color: #666; text-align: right; }
             table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-            th, td { border: 1px solid #000; padding: 8px; text-align: right; font-size: 14px; }
-            th { background-color: #1e40af; color: white; text-align: center; }
-            tr:nth-child(even) { background-color: #f2f2f2; }
+            th, td { border: 1px solid #000; padding: 8px; text-align: right; }
+            th { background-color: #000; color: white; text-align: center; }
+            td.text-left { text-align: left; }
+            .total-row td { font-weight: bold; }
             .footer { margin-top: 20px; text-align: center; color: #666; font-size: 12px; }
           </style>
         </head>
         <body>
           <div class="container">
-            <h1>${selectedCustomer.customer} Ledger</h1>
             <div class="header">
-              <p>Sarhad Tyre Traders</p>
-              <p>Date: ${new Date().toLocaleString()}</p>
-              <p>Total Cost: Rs. ${customer.totalCost.toLocaleString()}</p>
+              <div class="title">SARHAD TYRE TRADERS</div>
+              <div class="party">Party Name: ${selectedCustomer.customer}</div>
+              <div class="account">ACCOUNT LEDGER</div>
+              <div class="date-range">Date ${new Date(ledgerFilterDates.startDate || '2024-01-01').toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' }).toUpperCase()} - ${new Date(ledgerFilterDates.endDate || new Date()).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' }).toUpperCase()}</div>
+              <div class="date">Date: ${new Date().toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true }).toUpperCase()}</div>
+              <div class="page">Page 1</div>
             </div>
             <table>
               <thead>
                 <tr>
-                  <th>Inv.#</th>
+                  <th>Inv. #</th>
                   <th>Inv. Date</th>
                   <th>Narration</th>
                   <th>Debit Rs.</th>
@@ -447,25 +590,26 @@ const CustomerLedger = () => {
                 </tr>
               </thead>
               <tbody>
-                ${ledgerData.map(entry => {
-                  const debit = parseFloat(entry.debit) || 0;
-                  const credit = parseFloat(entry.credit) || 0;
-                  const date = new Date(entry.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' }).replace(/ /g, '-');
-                  return `
-                    <tr>
-                      <td>${entry.invoiceNumber || 'N/A'}</td>
-                      <td>${date}</td>
-                      <td>${entry.narration || 'N/A'}</td>
-                      <td>${debit.toLocaleString()}</td>
-                      <td>${credit.toLocaleString()}</td>
-                      <td>${fixedBalance.toLocaleString()}</td>
-                    </tr>
-                  `;
-                }).join('')}
+                ${ledgerData.map(entry => `
+                  <tr>
+                    <td>${entry.invoiceNumber || 'N/A'}</td>
+                    <td>${parseDateSafely(entry.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' }).toUpperCase()}</td>
+                    <td class="text-left">${entry.narration || 'N/A'}</td>
+                    <td>${(parseFloat(entry.debit) || 0).toLocaleString()}</td>
+                    <td>${(parseFloat(entry.credit) || 0).toLocaleString()}</td>
+                    <td>${parseFloat(entry.balance).toLocaleString()}</td>
+                  </tr>
+                `).join('')}
+                <tr class="total-row">
+                  <td colspan="3">Total:</td>
+                  <td>${totalDebit.toLocaleString()}</td>
+                  <td>${totalCredit.toLocaleString()}</td>
+                  <td></td>
+                </tr>
               </tbody>
             </table>
             <div class="footer">
-              <p>Generated by Sarhad Tyre Traders</p>
+              <p>Generated by SARHAD TYRE TRADERS</p>
             </div>
           </div>
           <script>
@@ -488,7 +632,7 @@ const CustomerLedger = () => {
       <div className="flex flex-col sm:flex-row sm:justify-between gap-4 mb-8">
         <input
           type="text"
-          placeholder="Search by name, items, cost, paid, due..."
+          placeholder="Search by customer..."
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
           className="w-full sm:w-1/3 px-4 py-3 border border-gray-200 rounded-xl shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white text-gray-700 transition duration-200"
@@ -497,7 +641,7 @@ const CustomerLedger = () => {
           onClick={openAddCustomerModal}
           className="px-6 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-xl shadow hover:shadow-lg hover:from-blue-700 hover:to-indigo-700 transition duration-300"
         >
-          Add Customer Details
+          Add Customer Payment Details
         </button>
       </div>
 
@@ -511,6 +655,8 @@ const CustomerLedger = () => {
             <h2 className="text-xl font-semibold text-gray-800">{item.customer}</h2>
             <p className="text-sm text-gray-500 mt-2">Total Items: {item.totalItems}</p>
             <p className="text-sm text-gray-500">Total Cost: Rs. {item.totalCost.toLocaleString()}</p>
+            <p className="text-sm text-gray-500">Total Paid: Rs. {item.totalPaid.toLocaleString()}</p>
+            <p className="text-sm text-gray-500">Due: Rs. {item.due.toLocaleString()}</p>
           </div>
         ))}
       </div>
@@ -612,21 +758,25 @@ const CustomerLedger = () => {
               <table className="min-w-full border-collapse text-sm text-left bg-white rounded-xl shadow-sm">
                 <thead>
                   <tr className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white">
-                    <th className="py-3 px-6 font-semibold border-1 border-black">Brand</th>
-                    <th className="py-3 px-6 font-semibold border-1 border-black">Sizes</th>
-                    <th className="py-3 px-6 font-semibold border-1 border-black">Total Items</th>
-                    <th className="py-3 px-6 font-semibold border-1 border-black">Total Cost</th>
-                    <th className="py-3 px-6 font-semibold border-1 border-black">Purchase Date</th>
+                    <th className="py-3 px-6 font-semibold border border-black">Brand</th>
+                    <th className="py-3 px-6 font-semibold border border-black">Sizes</th>
+                    <th className="py-3 px-6 font-semibold border border-black">Total Items</th>
+                    <th className="py-3 px-6 font-semibold border border-black">Total Cost</th>
+                    <th className="py-3 px-6 font-semibold border border-black">Total Paid</th>
+                    <th className="py-3 px-6 font-semibold border border-black">Due</th>
+                    <th className="py-3 px-6 font-semibold border border-black">Sale Date</th>
                   </tr>
                 </thead>
                 <tbody>
                   {getSaleSummary(selectedCustomer.customer).map((sale, index) => (
                     <tr key={index} className="border-b border-gray-200 hover:bg-gray-50 transition duration-200">
-                      <td className="py-3 px-6 border-1">{sale.brand}</td>
-                      <td className="py-3 px-6 border-1">{sale.sizes}</td>
-                      <td className="py-3 px-6 border-1">{sale.totalItems}</td>
-                      <td className="py-3 px-6 border-1">Rs. {sale.totalCost.toLocaleString()}</td>
-                      <td className="py-3 px-6 border-1">{sale.date}</td>
+                      <td className="py-3 px-6 border border-black">{sale.brand}</td>
+                      <td className="py-3 px-6 border border-black">{sale.sizes}</td>
+                      <td className="py-3 px-6 border border-black">{sale.totalItems}</td>
+                      <td className="py-3 px-6 border border-black">Rs. {parseFloat(sale.totalCost).toLocaleString()}</td>
+                      <td className="py-3 px-6 border border-black">Rs. {sale.totalPaid.toLocaleString()}</td>
+                      <td className="py-3 px-6 border border-black">Rs. {sale.due.toLocaleString()}</td>
+                      <td className="py-3 px-6 border border-black">{sale.date}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -662,7 +812,7 @@ const CustomerLedger = () => {
         overlayClassName="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center"
       >
         <h2 className="text-2xl font-bold mb-6 text-gray-800 bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text">
-          Add Customer Details
+          Add Customer Payment Details
         </h2>
         <form onSubmit={handleAddCustomerDetails} className="flex flex-wrap gap-4">
           <div className="w-full md:w-[48%]">
@@ -683,6 +833,40 @@ const CustomerLedger = () => {
             </datalist>
           </div>
           <div className="w-full md:w-[48%]">
+            <label className="block text-sm font-medium mb-1 text-gray-700">Brand</label>
+            <input
+              type="text"
+              name="brand"
+              value={customerFormData.brand}
+              onChange={handleCustomerFormChange}
+              list="brandNames"
+              className="w-full px-4 py-2 border border-gray-200 rounded-xl shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              required
+            />
+            <datalist id="brandNames">
+              {getBrandsForCustomer(customerFormData.customerName).map((brand, index) => (
+                <option key={index} value={brand} />
+              ))}
+            </datalist>
+          </div>
+          <div className="w-full md:w-[48%]">
+            <label className="block text-sm font-medium mb-1 text-gray-700">Size</label>
+            <input
+              type="text"
+              name="size"
+              value={customerFormData.size}
+              onChange={handleCustomerFormChange}
+              list="sizeNames"
+              className="w-full px-4 py-2 border border-gray-200 rounded-xl shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              required
+            />
+            <datalist id="sizeNames">
+              {getSizesForBrand(customerFormData.customerName, customerFormData.brand).map((size, index) => (
+                <option key={index} value={size} />
+              ))}
+            </datalist>
+          </div>
+          <div className="w-full md:w-[48%]">
             <label className="block text-sm font-medium mb-1 text-gray-700">Total Brands</label>
             <input
               type="number"
@@ -693,7 +877,7 @@ const CustomerLedger = () => {
             />
           </div>
           <div className="w-full md:w-[48%]">
-            <label className="block text-sm font-medium mb-1 text-gray-700">Total Items</label>
+            <label className="block text-sm font-medium mb-1 text-gray-700">Total Items (Brand)</label>
             <input
               type="number"
               name="totalItems"
@@ -703,7 +887,7 @@ const CustomerLedger = () => {
             />
           </div>
           <div className="w-full md:w-[48%]">
-            <label className="block text-sm font-medium mb-1 text-gray-700">Total Cost</label>
+            <label className="block text-sm font-medium mb-1 text-gray-700">Total Cost (Brand)</label>
             <input
               type="number"
               name="totalCost"
@@ -713,7 +897,7 @@ const CustomerLedger = () => {
             />
           </div>
           <div className="w-full md:w-[48%]">
-            <label className="block text-sm font-medium mb-1 text-gray-700">Total Paid</label>
+            <label className="block text-sm font-medium mb-1 text-gray-700">Payment Amount</label>
             <input
               type="number"
               name="totalPaid"
@@ -724,11 +908,21 @@ const CustomerLedger = () => {
             />
           </div>
           <div className="w-full md:w-[48%]">
-            <label className="block text-sm font-medium mb-1 text-gray-700">Due</label>
+            <label className="block text-sm font-medium mb-1 text-gray-700">Due (Customer)</label>
             <input
               type="number"
               name="due"
               value={customerFormData.due}
+              className="w-full px-4 py-2 border border-gray-200 bg-gray-100 rounded-xl"
+              readOnly
+            />
+          </div>
+          <div className="w-full md:w-[48%]">
+            <label className="block text-sm font-medium mb-1 text-gray-700">Due (Brand)</label>
+            <input
+              type="number"
+              name="brandDue"
+              value={customerFormData.brandDue}
               className="w-full px-4 py-2 border border-gray-200 bg-gray-100 rounded-xl"
               readOnly
             />
@@ -743,7 +937,7 @@ const CustomerLedger = () => {
               required
             >
               <option value="">Select Payment Method</option>
-              <option value="Debit Card">Debit Card</option>
+              <option value="Debit Card">Debit</option>
               <option value="Bank">Bank</option>
             </select>
           </div>
@@ -770,7 +964,7 @@ const CustomerLedger = () => {
             </button>
             <button
               type="submit"
-              className="px-6 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-xl hover:from-blue-700 hover:to-indigo-700 transition duration-200"
+              className="px-6 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-xl hover:from-blue-700 hover:to-indigo-700 transition duration-300"
             >
               Save
             </button>
@@ -794,12 +988,24 @@ const CustomerLedger = () => {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
               </svg>
             </button>
-            <h2 className="text-3xl font-bold mb-6 text-gray-900 bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text">
-              {selectedCustomer.customer} Ledger
-            </h2>
-            <div className="mb-4">
-              <p className="text-sm font-medium text-gray-600">Sarhad Tyre Traders</p>
-              <p className="text-sm text-gray-500">Date: ${new Date().toLocaleString()}</p>
+            <div className="header mb-6">
+              <h2 className="text-3xl font-bold text-center text-gray-900">SARHAD TYRE TRADERS</h2>
+              <p className="text-md font-bold text-black mt-2">Party Name: {selectedCustomer.customer}</p>
+              <div className="flex justify-between mt-3">
+                <div>
+                  <p className="text-sm font-medium text-gray-600">ACCOUNT LEDGER</p>
+                  <p className="text-sm text-gray-500">
+                    Date {new Date(ledgerFilterDates.startDate || '2024-01-01').toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' }).toUpperCase()} - 
+                    {new Date(ledgerFilterDates.endDate || new Date()).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' }).toUpperCase()}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-sm text-gray-500 text-right">Page 1</p>
+                  <p className="text-sm font-medium text-gray-600">
+                    Date: {new Date().toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true }).toUpperCase()}
+                  </p>
+                </div>
+              </div>
             </div>
             <div className="flex flex-col sm:flex-row gap-4 mb-4">
               <div className="flex gap-3">
@@ -838,25 +1044,31 @@ const CustomerLedger = () => {
               <table className="min-w-full border-collapse text-sm text-left bg-white rounded-xl shadow-sm">
                 <thead>
                   <tr className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white">
-                    <th className="py-3 px-6 font-semibold border-1 border-black">Inv.#</th>
-                    <th className="py-3 px-6 font-semibold border-1 border-black">Inv. Date</th>
-                    <th className="py-3 px-6 font-semibold border-1 border-black">Narration</th>
-                    <th className="py-3 px-6 font-semibold border-1 border-black">Debit Rs.</th>
-                    <th className="py-3 px-6 font-semibold border-1 border-black">Credit Rs.</th>
-                    <th className="py-3 px-6 font-semibold border-1 border-black">Balance</th>
+                    <th className="py-3 px-6 font-semibold border border-black">Inv.#</th>
+                    <th className="py-3 px-6 font-semibold border border-black">Inv. Date</th>
+                    <th className="py-3 px-6 font-semibold border border-black">Narration</th>
+                    <th className="py-3 px-6 font-semibold border border-black">Debit Rs.</th>
+                    <th className="py-3 px-6 font-semibold border border-black">Credit Rs.</th>
+                    <th className="py-3 px-6 font-semibold border border-black">Balance</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {getLedgerForCustomer(selectedCustomer.customer).map((entry, index) => (
+                  {getLedgerForCustomer(selectedCustomer.customer).ledgerData.map((entry, index) => (
                     <tr key={index} className="border-b border-gray-200 hover:bg-gray-50 transition duration-200">
-                      <td className="py-3 px-6 border-1">{entry.invoiceNumber}</td>
-                      <td className="py-3 px-6 border-1">{new Date(entry.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' }).replace(/ /g, '-')}</td>
-                      <td className="py-3 px-6 border-1">{entry.narration}</td>
-                      <td className="py-3 px-6 border-1">{entry.debit.toLocaleString()}</td>
-                      <td className="py-3 px-6 border-1">{entry.credit.toLocaleString()}</td>
-                      <td className="py-3 px-6 border-1">{entry.balance.toLocaleString()}</td>
+                      <td className="py-3 px-6 border border-black">{entry.invoiceNumber}</td>
+                      <td className="py-3 px-6 border border-black">{parseDateSafely(entry.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' }).replace(/ /g, '-')}</td>
+                      <td className="py-3 px-6 border border-black">{entry.narration}</td>
+                      <td className="py-3 px-6 border border-black">{(parseFloat(entry.debit) || 0).toLocaleString()}</td>
+                      <td className="py-3 px-6 border border-black">{(parseFloat(entry.credit) || 0).toLocaleString()}</td>
+                      <td className="py-3 px-6 border border-black">{parseFloat(entry.balance).toLocaleString()}</td>
                     </tr>
                   ))}
+                  <tr className="font-bold">
+                    <td colSpan="3" className="py-3 px-6 border border-black text-right">Total:</td>
+                    <td className="py-3 px-6 border border-black">{getLedgerForCustomer(selectedCustomer.customer).totalDebit.toLocaleString()}</td>
+                    <td className="py-3 px-6 border border-black">{getLedgerForCustomer(selectedCustomer.customer).totalCredit.toLocaleString()}</td>
+                    <td className="py-3 px-6 border border-black"></td>
+                  </tr>
                 </tbody>
               </table>
             </div>
@@ -873,6 +1085,9 @@ const CustomerLedger = () => {
               >
                 Close
               </button>
+            </div>
+            <div className="footer mt-4 text-center text-gray-500 text-sm">
+              Generated by SARHAD TYRE TRADERS
             </div>
           </div>
         )}
