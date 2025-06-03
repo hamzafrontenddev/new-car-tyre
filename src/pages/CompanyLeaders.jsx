@@ -68,7 +68,12 @@ const CompanyLeaders = () => {
     });
 
     const unsubscribeLedger = onSnapshot(collection(db, 'companyLedgerEntries'), (snapshot) => {
-      const ledgerList = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      const ledgerList = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data(),
+        date: doc.data().date?.toDate ? doc.data().date.toDate() : new Date(doc.data().date || Date.now()),
+        createdAt: doc.data().createdAt?.toDate ? doc.data().createdAt.toDate() : new Date(doc.data().date || Date.now()),
+      }));
       setLedgerEntries(ledgerList);
     });
 
@@ -218,7 +223,7 @@ const CompanyLeaders = () => {
     if (!company) return { ledgerData: [], totalDebit: 0, totalCredit: 0 };
 
     const sortedEntries = ledgerEntries
-      .filter(entry => entry.companyName === companyName)
+      .filter(entry => entry.companyName === companyName.toLowerCase()) // Normalize case
       .filter(entry => {
         const entryDate = new Date(entry.date);
         const { startDate, endDate } = ledgerFilterDates;
@@ -227,43 +232,24 @@ const CompanyLeaders = () => {
         }
         return true;
       })
-      .sort((a, b) => {
-        const aDate = a.createdAt ? new Date(a.createdAt) : new Date(a.date);
-        const bDate = b.createdAt ? new Date(b.createdAt) : new Date(b.date);
-        return bDate - aDate; // Descending order: newest to oldest
-      });
+      .sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt)); // Oldest at top, newest at bottom
 
-    let runningBalance = 0; // Start balance from 0
+    let balance = 0; // Initial balance starts at 0
     const ledgerData = sortedEntries.map((entry, index) => {
       const debit = parseFloat(entry.debit) || 0;
       const credit = parseFloat(entry.credit) || 0;
-      runningBalance = runningBalance + debit - credit; // Debit increases balance, Credit decreases balance
-
-      let detailedNarration = entry.narration || 'N/A';
-      if (entry.narration && entry.narration.startsWith('ONLINE bY')) {
-        detailedNarration = entry.narration;
-      } else {
-        let buyItem = buyData.find(item => item.invoiceNumber === entry.invoiceNumber);
-        if (!buyItem) {
-          buyItem = buyData
-            .filter(item => item.company === companyName && item.brand === entry.brand && item.size === entry.size)
-            .sort((a, b) => new Date(b.date) - new Date(a.date))[0];
-        }
-        if (buyItem) {
-          detailedNarration = `${buyItem.size || 'N/A'} ${buyItem.model || 'N/A'} ${buyItem.brand || 'N/A'} ${buyItem.quantity || 0}X${buyItem.price || 0}`;
-        }
-      }
+      balance += debit - credit; // Balance accumulates from oldest to newest
 
       return {
         index: index + 1,
-        invoiceNumber: entry.invoiceNumber || `RV${Date.now()}-${index}`,
-        date: entry.date,
-        narration: detailedNarration,
+        date: new Date(entry.date).toISOString().split('T')[0],
+        description: entry.narration || 'N/A',
+        invoice: entry.invoiceNumber || '-',
         debit,
         credit,
-        balance: runningBalance.toFixed(2),
-        createdAt: entry.createdAt || entry.date,
-        originalEntry: entry,
+        balance: balance,
+        balanceType: balance >= 0 ? 'Cr' : 'Dr',
+        balanceDisplay: Math.abs(balance),
       };
     });
 
@@ -444,21 +430,20 @@ const CompanyLeaders = () => {
 
     if (paymentMethod === 'Bank') {
       narration = `ONLINE bY ${bankName}`;
-      credit = parseFloat(totalPaid) || 0; // Credit payment reduces balance
+      credit = parseFloat(totalPaid) || 0;
     } else if (paymentMethod === 'Debit Card') {
       const latestPurchase = buyData
         .filter(item => item.company === companyName && item.brand === brand && item.size === size)
         .sort((a, b) => new Date(b.date) - new Date(a.date))[0];
       if (latestPurchase) {
-        narration = `${latestPurchase.size || 'N/A'} ${latestPurchase.model || 'N/A'} ${latestPurchase.brand || 'N/A'} ${latestPurchase.quantity || 0}X${latestPurchase.price || 0}`;
+        narration = `${latestPurchase.size || 'N/A'} ${latestPurchase.model || 'N/A'} ${latestPurchase.brand || 'N/A'} ${latestPurchase.quantity || 0}X${parseFloat(latestPurchase.price || 0)}`;
       } else {
-        narration = 'Debit Payment';
+        narration = 'Debit';
       }
-      debit = parseFloat(totalPaid) || 0; // Debit payment increases balance
+      debit = parseFloat(totalPaid) || 0;
     }
 
     try {
-      // Update or add brand-specific details
       if (brandDetailExists) {
         const brandDoc = doc(db, 'brandDetails', brandDetailExists.id);
         const existingTotalPaid = parseFloat(brandDetailExists.totalPaid) || 0;
@@ -494,7 +479,6 @@ const CompanyLeaders = () => {
         });
       }
 
-      // Update company-level totalPaid and due
       let companyTotalPaid = 0;
       brandDetails
         .filter(detail => detail.companyName === companyName)
@@ -524,9 +508,8 @@ const CompanyLeaders = () => {
         });
       }
 
-      // Add ledger entry
       await addDoc(collection(db, 'companyLedgerEntries'), {
-        companyName,
+        companyName: companyName.toLowerCase(), // Normalize case
         brand,
         size,
         invoiceNumber: `RV${Date.now()}-${Math.floor(Math.random() * 1000)}`,
@@ -547,7 +530,7 @@ const CompanyLeaders = () => {
 
   const handlePrint = () => {
     if (!selectedCompany) {
-      toast.error('No company selected for printing');
+      toast.error('Company not selected for printing');
       return;
     }
 
@@ -572,11 +555,13 @@ const CompanyLeaders = () => {
             .header .account { font-size: 14px; margin: 5px 0; }
             .header .date-range { font-size: 14px; margin: 5px 0; }
             .header .date { font-size: 14px; margin: 5px 0; text-align: right; }
-            .header .page { font-size: 12px; color: #666; text-align: right; }
+            .header .page { font-size: 12px; color: #666; text-align: right; font-weight: bold; }
             table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-            th, td { border: 1px solid #000; padding: 8px; text-align: right; }
+            th, td { border: 1px solid #000; padding: 10px 8px; text-align: right; }
             th { background-color: #000; color: white; text-align: center; }
             td.text-left { text-align: left; }
+            .balance-cr { color: red; font-weight: bold; }
+            .balance-dr { color: green; font-weight: bold; }
             .total-row td { font-weight: bold; }
             .footer { margin-top: 20px; text-align: center; color: #666; font-size: 12px; }
           </style>
@@ -587,30 +572,30 @@ const CompanyLeaders = () => {
               <div class="title">SARHAD TYRE TRADERS</div>
               <div class="party">Party Name: ${selectedCompany.company}</div>
               <div class="account">ACCOUNT LEDGER</div>
-              <div class="date-range">Date ${new Date(ledgerFilterDates.startDate || '2024-01-01').toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' }).toUpperCase()} - ${new Date(ledgerFilterDates.endDate || new Date()).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' }).toUpperCase()}</div>
+              <div class="date-range">Date ${new Date(ledgerFilterDates.startDate || '2025-06-01').toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' }).toUpperCase()} - ${new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' }).toUpperCase()}</div>
               <div class="date">Date: ${new Date().toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true }).toUpperCase()}</div>
               <div class="page">Page 1</div>
             </div>
             <table>
               <thead>
                 <tr>
-                  <th>Inv. #</th>
-                  <th>Inv. Date</th>
-                  <th>Narration</th>
-                  <th>Debit Rs.</th>
-                  <th>Credit Rs.</th>
-                  <th>Balance</th>
+                  <th>Date</th>
+                  <th>Description</th>
+                  <th>Invoice #</th>
+                  <th>Debit (PKR)</th>
+                  <th>Credit (PKR)</th>
+                  <th>Balance (PKR)</th>
                 </tr>
               </thead>
               <tbody>
                 ${ledgerData.map(entry => `
                   <tr>
-                    <td>${entry.invoiceNumber}</td>
-                    <td>${new Date(entry.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' }).toUpperCase()}</td>
-                    <td class="text-left">${entry.narration}</td>
-                    <td>${entry.debit.toLocaleString()}</td>
-                    <td>${entry.credit.toLocaleString()}</td>
-                    <td>${parseFloat(entry.balance).toLocaleString()}</td>
+                    <td>${entry.date}</td>
+                    <td class="text-left">${entry.description}</td>
+                    <td>${entry.invoice}</td>
+                    <td>${entry.debit > 0 ? `PKR ${entry.debit.toLocaleString()}` : '-'}</td>
+                    <td>${entry.credit > 0 ? `PKR ${entry.credit.toLocaleString()}` : '-'}</td>
+                    <td class="${entry.balance >= 0 ? 'balance-cr' : 'balance-dr'}">${entry.balanceDisplay.toLocaleString()} ${entry.balanceType}</td>
                   </tr>
                 `).join('')}
                 <tr class="total-row">
@@ -639,37 +624,37 @@ const CompanyLeaders = () => {
 
   return (
     <div className="p-6 max-w-7xl mx-auto bg-gradient-to-b from-gray-50 to-gray-100 min-h-screen">
-      <h1 className="text-4xl font-extrabold mb-8 text-gray-900 bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text">
+      <h1 className="text-4xl font-semibold mb-8 text-gray-900 bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">
         Company Ledger Dashboard
       </h1>
-      <div className="flex flex-col sm:flex-row sm:justify-between gap-4 mb-8">
+      <div className="flex flex-col md:flex-row justify-between gap-4 mb-8">
         <input
           type="text"
           placeholder="Search by company..."
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
-          className="w-full sm:w-1/3 px-4 py-3 border border-gray-200 rounded-xl shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white text-gray-700 transition duration-200"
+          className="w-full md:w-1/3 p-4 border rounded-lg shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 border-gray-200"
         />
         <button
           onClick={openAddCompanyModal}
-          className="px-6 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-xl shadow hover:shadow-lg hover:from-blue-700 hover:to-indigo-700 transition duration-300"
+          className="p-4 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-lg shadow hover:shadow-lg hover:from-blue-500 hover:to-indigo-500 transition duration-300"
         >
           Add Brand Payment Details
         </button>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         {filteredCompanies.map((item, index) => (
           <div
             key={index}
-            className="bg-white border border-gray-100 p-6 rounded-2xl shadow-lg hover:shadow-xl transition duration-300 cursor-pointer transform hover:-translate-y-1"
+            className="bg-white border rounded-xl px-6 py-4 shadow-md hover:shadow-lg transition duration-300 cursor-pointer"
             onClick={() => openModal(item)}
           >
             <h2 className="text-xl font-semibold text-gray-800">{item.company}</h2>
-            <p className="text-sm text-gray-500 mt-2">Total Items: {item.totalItems}</p>
-            <p className="text-sm text-gray-500">Total Cost: Rs. {item.totalCost.toLocaleString()}</p>
-            <p className="text-sm text-gray-500">Total Paid: Rs. {item.totalPaid.toLocaleString()}</p>
-            <p className="text-sm text-gray-500">Due: Rs. {item.due.toLocaleString()}</p>
+            <p className="text-gray-600">Total Items: {item.totalItems}</p>
+            <p className="text-gray-600">Total Cost: Rs. {item.totalCost.toLocaleString()}</p>
+            <p className="text-gray-600">Total Paid: Rs. {item.totalPaid.toLocaleString()}</p>
+            <p className="text-gray-600">Due: Rs. {item.due.toLocaleString()}</p>
           </div>
         ))}
       </div>
@@ -678,7 +663,7 @@ const CompanyLeaders = () => {
         isOpen={modalIsOpen}
         onRequestClose={closeModal}
         className="bg-white p-6 rounded-2xl shadow-2xl w-full max-w-4xl mx-auto mt-16 max-h-[70vh] overflow-y-auto"
-        overlayClassName="fixed inset-0 bg-black bg-opacity-70 flex justify-center items-center backdrop-blur-sm"
+        overlayClassName="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center"
       >
         {selectedCompany && (
           <div className="relative">
@@ -690,41 +675,41 @@ const CompanyLeaders = () => {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
               </svg>
             </button>
-            <h2 className="text-3xl font-bold mb-6 text-gray-900 bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text">
+            <h2 className="text-3xl font-bold mb-6 text-gray-800 bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">
               {selectedCompany.company} Details
             </h2>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
               <div className="bg-gray-50 p-4 rounded-xl shadow-sm hover:shadow-md transition duration-200">
-                <p className="text-sm font-medium text-gray-600">Company Name</p>
+                <p className="text-gray-600 font-medium">Company Name</p>
                 <p className="text-lg font-semibold text-gray-800">{selectedCompany.company}</p>
               </div>
               <div className="bg-gray-50 p-4 rounded-xl shadow-sm hover:shadow-md transition duration-200">
-                <p className="text-sm font-medium text-gray-600">Total Items</p>
+                <p className="text-gray-600">Total Items</p>
                 <p className="text-lg font-semibold text-gray-800">{selectedCompany.totalItems}</p>
               </div>
               <div className="bg-gray-50 p-4 rounded-xl shadow-sm hover:shadow-md transition duration-200">
-                <p className="text-sm font-medium text-gray-600">Total Cost</p>
+                <p className="text-gray-600">Total Cost</p>
                 <p className="text-lg font-semibold text-gray-800">Rs. {selectedCompany.totalCost.toLocaleString()}</p>
               </div>
               <div className="bg-gray-50 p-4 rounded-xl shadow-sm hover:shadow-md transition duration-200">
-                <p className="text-sm font-medium text-gray-600">Total Paid</p>
+                <p className="text-gray-600">Total Paid</p>
                 <p className="text-lg font-semibold text-gray-800">Rs. {selectedCompany.totalPaid.toLocaleString()}</p>
               </div>
               <div className="bg-gray-50 p-4 rounded-xl shadow-sm hover:shadow-md transition duration-200">
-                <p className="text-sm font-medium text-gray-600">Total Due</p>
+                <p className="text-gray-600">Total Due</p>
                 <p className="text-lg font-semibold text-gray-800">Rs. {selectedCompany.due.toLocaleString()}</p>
               </div>
             </div>
             <div className="flex justify-end mb-4">
               <button
                 onClick={() => openLedgerModal(selectedCompany)}
-                className="px-6 py-2 bg-gradient-to-r from-green-500 to-teal-500 text-white rounded-xl hover:from-green-600 hover:to-teal-600 transition duration-200"
+                className="px-4 py-2 bg-gradient-to-r from-green-500 to-teal-500 text-white rounded-lg hover:from-green-600 hover:to-teal-600 transition duration-200"
               >
                 View Ledger
               </button>
             </div>
             <h3 className="text-xl font-semibold text-gray-800 mb-4">Brand Details</h3>
-            <div className="flex flex-col sm:flex-row gap-4 mb-4">
+            <div className="flex flex-col md:flex-row gap-4 mb-4">
               <input
                 type="text"
                 placeholder="Search by brand or size..."
@@ -733,7 +718,7 @@ const CompanyLeaders = () => {
                   setBrandSearchQuery(e.target.value);
                   setCurrentPage(1);
                 }}
-                className="w-full sm:w-1/3 px-4 py-2 border border-gray-200 rounded-xl shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-700"
+                className="w-full md:w-1/3 p-4 px-2 border rounded-md border-gray-300 shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-700"
               />
               <div className="flex gap-3">
                 <div className="relative">
@@ -744,7 +729,7 @@ const CompanyLeaders = () => {
                     startDate={brandFilterDates.startDate}
                     endDate={brandFilterDates.endDate}
                     placeholderText="Start Date"
-                    className="w-full px-4 py-2 border border-gray-200 rounded-xl shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-700"
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-700"
                     dateFormat="dd/MM/yyyy"
                     isClearable
                   />
@@ -759,7 +744,7 @@ const CompanyLeaders = () => {
                     endDate={brandFilterDates.endDate}
                     minDate={brandFilterDates.startDate}
                     placeholderText="End Date"
-                    className="w-full px-4 py-2 border border-gray-200 rounded-xl shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-700"
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-700"
                     dateFormat="dd/MM/yyyy"
                     isClearable
                   />
@@ -768,28 +753,28 @@ const CompanyLeaders = () => {
               </div>
             </div>
             <div className="overflow-x-auto">
-              <table className="min-w-full border-collapse text-sm text-left bg-white rounded-xl shadow-sm">
+              <table className="w-full border-collapse border border-gray-300 text-sm">
                 <thead>
-                  <tr className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white">
-                    <th className="py-3 px-6 font-semibold border border-black">Brand</th>
-                    <th className="py-3 px-6 font-semibold border border-black">Sizes</th>
-                    <th className="py-3 px-6 font-semibold border border-black">Total Items</th>
-                    <th className="py-3 px-6 font-semibold border border-black">Total Cost</th>
-                    <th className="py-3 px-6 font-semibold border border-black">Total Paid</th>
-                    <th className="py-3 px-6 font-semibold border border-black">Due</th>
-                    <th className="py-3 px-6 font-semibold border border-black">Purchase Date</th>
+                  <tr className="bg-gradient-to-r from-blue-600 to-indigo-600 text-gray-50">
+                    <th className="py-3 px-6 border border-gray-400">Brand</th>
+                    <th className="py-3 px-6 border border-gray-400">Size</th>
+                    <th className="py-3 px-6 border border-gray-400">Total Items</th>
+                    <th className="py-3 px-6 border border-gray-400">Total Cost</th>
+                    <th className="py-3 px-6 border border-gray-400">Total Paid</th>
+                    <th className="py-3 px-6 border border-gray-400">Due</th>
+                    <th className="py-3 px-6 border border-gray-400">Purchase Date</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {getBrandSummary(selectedCompany.company).map((brand, index) => (
-                    <tr key={index} className="border-b border-gray-200 hover:bg-gray-50 transition duration-200">
-                      <td className="py-3 px-6 border border-black">{brand.brand}</td>
-                      <td className="py-3 px-6 border border-black">{brand.sizes}</td>
-                      <td className="py-3 px-6 border border-black">{brand.totalItems}</td>
-                      <td className="py-3 px-6 border border-black">Rs. {brand.totalCost.toLocaleString()}</td>
-                      <td className="py-3 px-6 border border-black">Rs. {brand.totalPaid.toLocaleString()}</td>
-                      <td className="py-3 px-6 border border-black">Rs. {brand.due.toLocaleString()}</td>
-                      <td className="py-3 px-6 border border-black">{brand.date}</td>
+                  {getBrandSummary(selectedCompany.company).map((item, index) => (
+                    <tr key={index} className="hover:bg-gray-100">
+                      <td className="py-3 px-6 border border-gray-400">{item.brand}</td>
+                      <td className="py-3 px-6 border border-gray-400">{item.sizes}</td>
+                      <td className="py-3 px-6 border border-gray-400">{item.totalItems}</td>
+                      <td className="py-3 px-6 border border-gray-400">Rs. {item.totalCost.toLocaleString()}</td>
+                      <td className="py-3 px-6 border border-gray-400">Rs. {item.totalPaid.toLocaleString()}</td>
+                      <td className="py-3 px-6 border border-gray-400">Rs. {item.due.toLocaleString()}</td>
+                      <td className="py-3 px-6 border border-gray-400">{item.date}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -800,16 +785,16 @@ const CompanyLeaders = () => {
                 <button
                   key={page}
                   onClick={() => setCurrentPage(page)}
-                  className={`px-4 py-2 rounded-xl ${currentPage === page ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'} transition duration-200`}
+                  className={`${currentPage === page ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'} px-4 py-2 rounded-lg transition duration-200`}
                 >
                   {page}
                 </button>
               ))}
             </div>
-            <div className="flex justify-end mt-6">
+            <div className="flex justify-end gap-4 mt-4">
               <button
                 onClick={closeModal}
-                className="px-6 py-2 bg-gradient-to-r from-red-500 to-pink-500 text-white rounded-xl hover:from-red-600 hover:to-pink-600 transition duration-200"
+                className="px-4 py-2 bg-gradient-to-r from-red-600 to-pink-600 text-white rounded-lg hover:from-red-500 hover:to-pink-500 transition duration-200"
               >
                 Close
               </button>
@@ -821,188 +806,190 @@ const CompanyLeaders = () => {
       <Modal
         isOpen={addCompanyModalIsOpen}
         onRequestClose={closeAddCompanyModal}
-        className="bg-white p-6 rounded-2xl shadow-xl w-full max-w-2xl mx-auto mt-16 max-h-[70vh] overflow-y-auto"
-        overlayClassName="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center"
+        className="bg-white p-6 rounded-lg shadow-xl max-w-lg mx-auto w-[90%] max-h-[80vh] overflow-y-auto mt-5"
+        overlayClassName="fixed inset-0 bg-gray-900 bg-opacity-50 flex justify-center items-center"
       >
-        <h2 className="text-2xl font-bold mb-6 text-gray-800 bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text">
-          Add Brand Payment Details
-        </h2>
-        <form onSubmit={handleAddCompanyDetails} className="flex flex-wrap gap-4">
-          <div className="w-full md:w-[48%]">
-            <label className="block text-sm font-medium mb-1 text-gray-700">Company Name</label>
-            <input
-              type="text"
-              name="companyName"
-              value={companyFormData.companyName}
-              onChange={handleCompanyFormChange}
-              list="companyNames"
-              className="w-full px-4 py-2 border border-gray-200 rounded-xl shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              required
-            />
-            <datalist id="companyNames">
-              {companySummary.map((item, index) => (
-                <option key={index} value={item.company} />
-              ))}
-            </datalist>
-          </div>
-          <div className="w-full md:w-[48%]">
-            <label className="block text-sm font-medium mb-1 text-gray-700">Brand</label>
-            <input
-              type="text"
-              name="brand"
-              value={companyFormData.brand}
-              onChange={handleCompanyFormChange}
-              list="brandNames"
-              className="w-full px-4 py-2 border border-gray-200 rounded-xl shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              required
-            />
-            <datalist id="brandNames">
-              {getBrandsForCompany(companyFormData.companyName).map((brand, index) => (
-                <option key={index} value={brand} />
-              ))}
-            </datalist>
-          </div>
-          <div className="w-full md:w-[48%]">
-            <label className="block text-sm font-medium mb-1 text-gray-700">Size</label>
-            <input
-              type="text"
-              name="size"
-              value={companyFormData.size}
-              onChange={handleCompanyFormChange}
-              list="sizeNames"
-              className="w-full px-4 py-2 border border-gray-200 rounded-xl shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              required
-            />
-            <datalist id="sizeNames">
-              {getSizesForBrand(companyFormData.companyName, companyFormData.brand).map((size, index) => (
-                <option key={index} value={size} />
-              ))}
-            </datalist>
-          </div>
-          <div className="w-full md:w-[48%]">
-            <label className="block text-sm font-medium mb-1 text-gray-700">Total Brands</label>
-            <input
-              type="number"
-              name="totalBrands"
-              value={companyFormData.totalBrands}
-              className="w-full px-4 py-2 border border-gray-200 bg-gray-100 rounded-xl"
-              readOnly
-            />
-          </div>
-          <div className="w-full md:w-[48%]">
-            <label className="block text-sm font-medium mb-1 text-gray-700">Total Company Items</label>
-            <input
-              type="number"
-              name="totalCompanyItems"
-              value={companyFormData.totalCompanyItems}
-              className="w-full px-4 py-2 border border-gray-200 bg-gray-100 rounded-xl"
-              readOnly
-            />
-          </div>
-          <div className="w-full md:w-[48%]">
-            <label className="block text-sm font-medium mb-1 text-gray-700">Total Company Cost</label>
-            <input
-              type="number"
-              name="totalCompanyCost"
-              value={companyFormData.totalCompanyCost}
-              className="w-full px-4 py-2 border border-gray-200 bg-gray-100 rounded-xl"
-              readOnly
-            />
-          </div>
-          <div className="w-full md:w-[48%]">
-            <label className="block text-sm font-medium mb-1 text-gray-700">Total Items (Brand)</label>
-            <input
-              type="number"
-              name="totalItems"
-              value={companyFormData.totalItems}
-              className="w-full px-4 py-2 border border-gray-200 bg-gray-100 rounded-xl"
-              readOnly
-            />
-          </div>
-          <div className="w-full md:w-[48%]">
-            <label className="block text-sm font-medium mb-1 text-gray-700">Total Cost (Brand)</label>
-            <input
-              type="number"
-              name="totalCost"
-              value={companyFormData.totalCost}
-              className="w-full px-4 py-2 border border-gray-200 bg-gray-100 rounded-xl"
-              readOnly
-            />
-          </div>
-          <div className="w-full md:w-[48%]">
-            <label className="block text-sm font-medium mb-1 text-gray-700">Payment Amount</label>
-            <input
-              type="number"
-              name="totalPaid"
-              value={companyFormData.totalPaid}
-              onChange={handleCompanyFormChange}
-              className="w-full px-4 py-2 border border-gray-200 rounded-xl shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              required
-            />
-          </div>
-          <div className="w-full md:w-[48%]">
-            <label className="block text-sm font-medium mb-1 text-gray-700">Due (Company)</label>
-            <input
-              type="number"
-              name="companyDue"
-              value={companyFormData.companyDue}
-              className="w-full px-4 py-2 border border-gray-200 bg-gray-100 rounded-xl"
-              readOnly
-            />
-          </div>
-          <div className="w-full md:w-[48%]">
-            <label className="block text-sm font-medium mb-1 text-gray-700">Due (Brand)</label>
-            <input
-              type="number"
-              name="brandDue"
-              value={companyFormData.brandDue}
-              className="w-full px-4 py-2 border border-gray-200 bg-gray-100 rounded-xl"
-              readOnly
-            />
-          </div>
-          <div className="w-full md:w-[48%]">
-            <label className="block text-sm font-medium mb-1 text-gray-700">Payment Method</label>
-            <select
-              name="paymentMethod"
-              value={companyFormData.paymentMethod}
-              onChange={handleCompanyFormChange}
-              className="w-full px-4 py-2 border border-gray-200 rounded-xl shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              required
-            >
-              <option value="">Select Payment Method</option>
-              <option value="Debit Card">Debit</option>
-              <option value="Bank">Bank</option>
-            </select>
-          </div>
-          {companyFormData.paymentMethod === 'Bank' && (
+        <div>
+          <h2 className="text-2xl font-semibold mb-6 text-gray-800 bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">
+            Add Brand Payment Details
+          </h2>
+          <form onSubmit={handleAddCompanyDetails} className="flex flex-wrap gap-4">
             <div className="w-full md:w-[48%]">
-              <label className="block text-sm font-medium mb-1 text-gray-700">Bank Name</label>
+              <label className="block text-sm font-medium mb-1 text-gray-700">Company Name</label>
               <input
                 type="text"
-                name="bankName"
-                value={companyFormData.bankName}
+                name="companyName"
+                value={companyFormData.companyName}
                 onChange={handleCompanyFormChange}
-                className="w-full px-4 py-2 border border-gray-200 rounded-xl shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                list="companyNames"
+                className="w-full p-4 px-2 border rounded-lg border-gray-200 shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                required
+              />
+              <datalist id="companyNames">
+                {companySummary.map((item, index) => (
+                  <option key={index} value={item.company} />
+                ))}
+              </datalist>
+            </div>
+            <div className="w-full md:w-[48%]">
+              <label className="block text-sm font-medium mb-1 text-gray-700">Brand</label>
+              <input
+                type="text"
+                name="brand"
+                value={companyFormData.brand}
+                onChange={handleCompanyFormChange}
+                list="brandNames"
+                className="w-full px-4 p-2 border rounded-lg border-gray-200 shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                required
+              />
+              <datalist id="brandNames">
+                {getBrandsForCompany(companyFormData.companyName).map((brand, index) => (
+                  <option key={index} value={brand} />
+                ))}
+              </datalist>
+            </div>
+            <div className="w-full md:w-[48%]">
+              <label className="block text-sm font-medium mb-1 text-gray-700">Size</label>
+              <input
+                type="text"
+                name="size"
+                value={companyFormData.size}
+                onChange={handleCompanyFormChange}
+                list="sizeNames"
+                className="w-full px-4 p-2 border rounded-lg border-gray-200 shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                required
+              />
+              <datalist id="sizeNames">
+                {getSizesForBrand(companyFormData.companyName, companyFormData.brand).map((size, index) => (
+                  <option key={index} value={size} />
+                ))}
+              </datalist>
+            </div>
+            <div className="w-full md:w-[48%]">
+              <label className="block text-sm font-medium mb-1 text-gray-700">Total Brands</label>
+              <input
+                type="number"
+                name="totalBrands"
+                value={companyFormData.totalBrands}
+                className="w-full px-4 p-2 border rounded-lg border-gray-200 bg-gray-100"
+                readOnly
+              />
+            </div>
+            <div className="w-full md:w-[48%]">
+              <label className="block text-sm font-medium mb-1 text-gray-700">Total Company Items</label>
+              <input
+                type="number"
+                name="totalCompanyItems"
+                value={companyFormData.totalCompanyItems}
+                className="w-full px-4 p-2 border rounded-lg border-gray-200 bg-gray-100"
+                readOnly
+              />
+            </div>
+            <div className="w-full md:w-[48%]">
+              <label className="block text-sm font-medium mb-1 text-gray-700">Total Company Cost</label>
+              <input
+                type="number"
+                name="totalCompanyCost"
+                value={companyFormData.totalCompanyCost}
+                className="w-full px-4 p-2 border rounded-lg border-gray-200 bg-gray-100"
+                readOnly
+              />
+            </div>
+            <div className="w-full md:w-[48%]">
+              <label className="block text-sm font-medium mb-1 text-gray-700">Total Items (Brand)</label>
+              <input
+                type="number"
+                name="totalItems"
+                value={companyFormData.totalItems}
+                className="w-full px-4 p-2 border rounded-lg border-gray-200 bg-gray-100"
+                readOnly
+              />
+            </div>
+            <div className="w-full md:w-[48%]">
+              <label className="block text-sm font-medium mb-1 text-gray-700">Total Cost (Brand)</label>
+              <input
+                type="number"
+                name="totalCost"
+                value={companyFormData.totalCost}
+                className="w-full px-4 p-2 border rounded-lg border-gray-200 bg-gray-100"
+                readOnly
+              />
+            </div>
+            <div className="w-full md:w-[48%]">
+              <label className="block text-sm font-medium mb-1 text-gray-700">Payment Amount</label>
+              <input
+                type="number"
+                name="totalPaid"
+                value={companyFormData.totalPaid}
+                onChange={handleCompanyFormChange}
+                className="w-full px-4 p-2 border rounded-lg border-gray-200 shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                 required
               />
             </div>
-          )}
-          <div className="w-full flex justify-end gap-4 mt-6">
-            <button
-              type="button"
-              onClick={closeAddCompanyModal}
-              className="px-6 py-2 bg-gradient-to-r from-gray-500 to-gray-600 text-white rounded-xl hover:from-gray-600 hover:to-gray-700 transition duration-200"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              className="px-6 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-xl hover:from-blue-700 hover:to-indigo-700 transition duration-300"
-            >
-              Save
-            </button>
-          </div>
-        </form>
+            <div className="w-full md:w-[48%]">
+              <label className="block text-sm font-medium mb-1 text-gray-700">Due (Company)</label>
+              <input
+                type="number"
+                name="companyDue"
+                value={companyFormData.companyDue}
+                className="w-full px-4 p-2 border rounded-lg border-gray-200 bg-gray-100"
+                readOnly
+              />
+            </div>
+            <div className="w-full md:w-[48%]">
+              <label className="block text-sm font-medium mb-1 text-gray-700">Due (Brand)</label>
+              <input
+                type="number"
+                name="brandDue"
+                value={companyFormData.brandDue}
+                className="w-full px-4 p-2 border rounded-lg border-gray-200 bg-gray-100"
+                readOnly
+              />
+            </div>
+            <div className="w-full md:w-[48%]">
+              <label className="block text-sm font-medium mb-1 text-gray-700">Payment Method</label>
+              <select
+                name="paymentMethod"
+                value={companyFormData.paymentMethod}
+                onChange={handleCompanyFormChange}
+                className="w-full px-4 p-2 border rounded-lg border-gray-200 shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                required
+              >
+                <option value="">Select Payment Method</option>
+                <option value="Debit Card">Debit</option>
+                <option value="Bank">Bank</option>
+              </select>
+            </div>
+            {companyFormData.paymentMethod === 'Bank' && (
+              <div className="w-full md:w-[48%]">
+                <label className="block text-sm font-medium mb-1 text-gray-700">Bank Name</label>
+                <input
+                  type="text"
+                  name="bankName"
+                  value={companyFormData.bankName}
+                  onChange={handleCompanyFormChange}
+                  className="w-full px-4 p-2 border rounded-lg border-gray-200 shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  required
+                />
+              </div>
+            )}
+            <div className="w-full flex justify-end gap-4 mt-6">
+              <button
+                type="button"
+                onClick={closeAddCompanyModal}
+                className="px-4 py-2 bg-gradient-to-r from-gray-500 to-gray-600 text-white rounded-lg hover:from-gray-600 hover:to-gray-700 transition duration-200"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                className="px-4 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-lg hover:from-blue-700 hover:to-indigo-700 transition duration-300"
+              >
+                Save
+              </button>
+            </div>
+          </form>
+        </div>
       </Modal>
 
       <Modal
@@ -1023,19 +1010,19 @@ const CompanyLeaders = () => {
             </button>
             <div className="header mb-6">
               <h2 className="text-3xl font-bold text-center text-gray-900">SARHAD TYRE TRADERS</h2>
-              <p className="text-md font-bold text-black mt-2">Party Name: ${selectedCompany.company}</p>
+              <p className="text-md font-bold text-black mt-2">Party Name: {selectedCompany.company}</p>
               <div className="flex justify-between mt-3">
                 <div>
                   <p className="text-sm font-medium text-gray-600">ACCOUNT LEDGER</p>
                   <p className="text-sm text-gray-500">
-                    Date ${new Date(ledgerFilterDates.startDate || '2024-01-01').toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' }).toUpperCase()} - 
-                    ${new Date(ledgerFilterDates.endDate || new Date()).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' }).toUpperCase()}
+                    Date {new Date(ledgerFilterDates.startDate || '2025-06-01').toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' }).toUpperCase()} - 
+                    {new Date(ledgerFilterDates.endDate || new Date()).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' }).toUpperCase()}
                   </p>
                 </div>
                 <div>
                   <p className="text-sm text-gray-500 text-right">Page 1</p>
                   <p className="text-sm font-medium text-gray-600">
-                    Date: ${new Date().toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true }).toUpperCase()}
+                    Date: {new Date().toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true }).toUpperCase()}
                   </p>
                 </div>
               </div>
@@ -1076,31 +1063,37 @@ const CompanyLeaders = () => {
             <div className="overflow-x-auto">
               <table className="min-w-full border-collapse text-sm bg-white rounded-xl shadow-sm">
                 <thead>
-                  <tr>
-                    <th className="py-3 px-6 font-semibold border border-black">Inv. #</th>
-                    <th className="py-3 px-6 font-semibold border border-black">Inv. Date</th>
-                    <th className="py-3 px-6 font-semibold border border-black">Narration</th>
-                    <th className="py-3 px-6 font-semibold border border-black">Debit Rs.</th>
-                    <th className="py-3 px-6 font-semibold border border-black">Credit Rs.</th>
-                    <th className="py-3 px-6 font-semibold border border-black">Balance</th>
+                  <tr className="bg-gray-200">
+                    <th className="py-3 px-6 font-semibold border border-black text-left">Invoice #</th>
+                    <th className="py-3 px-6 font-semibold border border-black text-left">Date</th>
+                    <th className="py-3 px-6 font-semibold border border-black text-left">Description</th>
+                    <th className="py-3 px-6 font-semibold border border-black text-right">Debit (PKR)</th>
+                    <th className="py-3 px-6 font-semibold border border-black text-right">Credit (PKR)</th>
+                    <th className="py-3 px-6 font-semibold border border-black text-right">Balance (PKR)</th>
                   </tr>
                 </thead>
                 <tbody>
                   {getLedgerForCompany(selectedCompany.company).ledgerData.map((entry, index) => (
-                    <tr key={index} className="border-b border-gray-200 hover:bg-gray-50 transition duration-200">
-                      <td className="py-3 px-6 border border-black">{entry.invoiceNumber}</td>
-                      <td className="py-3 px-6 border border-black">{new Date(entry.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' }).toUpperCase()}</td>
-                      <td className="py-3 px-6 border border-black text-left">{entry.narration}</td>
-                      <td className="py-3 px-6 border border-black">{(parseFloat(entry.debit) || 0).toLocaleString()}</td>
-                      <td className="py-3 px-6 border border-black">{(parseFloat(entry.credit) || 0).toLocaleString()}</td>
-                      <td className="py-3 px-6 border border-black">{parseFloat(entry.balance).toLocaleString()}</td>
+                    <tr key={index} className={index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+                      <td className="py-3 px-6 border border-black">{entry.invoice}</td>
+                      <td className="py-3 px-6 border border-black">{entry.date}</td>
+                      <td className="py-3 px-6 border border-black text-left">{entry.description}</td>
+                      <td className="py-3 px-6 border border-black text-right">{entry.debit > 0 ? `PKR ${entry.debit.toLocaleString()}` : '-'}</td>
+                      <td className="py-3 px-6 border border-black text-right">{entry.credit > 0 ? `PKR ${entry.credit.toLocaleString()}` : '-'}</td>
+                      <td className="py-3 px-6 border border-black text-right">
+                        {entry.balance >= 0 ? (
+                          <span className="text-red-600 font-semibold">PKR {entry.balanceDisplay.toLocaleString()} Cr</span>
+                        ) : (
+                          <span className="text-green-600 font-semibold">PKR {entry.balanceDisplay.toLocaleString()} Dr</span>
+                        )}
+                      </td>
                     </tr>
                   ))}
                   <tr className="font-bold">
                     <td colSpan="3" className="py-3 px-6 border border-black text-right">Total:</td>
-                    <td className="py-3 px-6 border border-black">{getLedgerForCompany(selectedCompany.company).totalDebit.toLocaleString()}</td>
-                    <td className="py-3 px-6 border border-black">{getLedgerForCompany(selectedCompany.company).totalCredit.toLocaleString()}</td>
-                    <td className="py-3 px-6 border border-black"></td>
+                    <td className="py-3 px-6 border border-black text-right">{getLedgerForCompany(selectedCompany.company).totalDebit.toLocaleString()}</td>
+                    <td className="py-3 px-6 border border-black text-right">{getLedgerForCompany(selectedCompany.company).totalCredit.toLocaleString()}</td>
+                    <td className="py-3 px-6 border border-black text-right"></td>
                   </tr>
                 </tbody>
               </table>

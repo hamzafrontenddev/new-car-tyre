@@ -60,7 +60,7 @@ const CustomerLedger = () => {
       const sellList = snapshot.docs.map(doc => ({
         id: doc.id,
         ...doc.data(),
-        date: doc.data().date?.toDate ? doc.data().date.toDate() : new Date(doc.data().date || Date.now())
+        date: doc.data().date?.toDate ? doc.data().date.toDate() : parseDateSafely(doc.data().date || Date.now())
       }));
       setSellData(sellList);
     });
@@ -76,7 +76,12 @@ const CustomerLedger = () => {
     });
 
     const unsubscribeLedger = onSnapshot(collection(db, 'customerLedgerEntries'), (snapshot) => {
-      const ledgerList = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      const ledgerList = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data(),
+        date: doc.data().date?.toDate ? doc.data().date.toDate() : parseDateSafely(doc.data().date || Date.now()),
+        createdAt: doc.data().createdAt?.toDate ? doc.data().createdAt.toDate() : parseDateSafely(doc.data().date || Date.now()),
+      }));
       setLedgerEntries(ledgerList);
     });
 
@@ -155,25 +160,24 @@ const CustomerLedger = () => {
             totalItems: 0,
             totalCost: 0,
             dates: new Set(),
-            earliestDate: itemDate, // Track the earliest date for sorting
+            earliestDate: itemDate,
           };
         }
 
         saleSizeMap[key].totalItems += item.quantity;
         saleSizeMap[key].totalCost += item.price * item.quantity;
         if (item.date) saleSizeMap[key].dates.add(itemDate.toISOString().split('T')[0]);
-        // Update earliest date if current item date is older
         if (itemDate < saleSizeMap[key].earliestDate) {
           saleSizeMap[key].earliestDate = itemDate;
         }
-    });
+      });
 
     const saleSummary = Object.values(saleSizeMap)
       .map(entry => {
         const details = brandDetails.find(detail => detail.customerName === customerName && detail.brand === entry.brand && detail.size === entry.size) || {};
         const totalCost = entry.totalCost;
         const totalPaid = parseFloat(details.totalPaid) || 0;
-        const due = (totalCost - entry.totalCost).toFixed(2);
+        const due = (totalCost - totalPaid).toFixed(2);
         return {
           brand: entry.brand,
           totalItems: entry.totalItems,
@@ -181,8 +185,8 @@ const CustomerLedger = () => {
           totalPaid,
           due: parseFloat(due) >= 0 ? parseFloat(due) : 0,
           sizes: entry.size,
-          date: Array.from(entry.dates).sort((a, b) => parseDateSafely(a) - parseDateSafely(b)).join(', ') || 'N/A', // Sort dates within the string
-          earliestDate: entry.earliestDate, // For sorting the entries
+          date: Array.from(entry.dates).sort((a, b) => parseDateSafely(a) - parseDateSafely(b)).join(', ') || 'N/A',
+          earliestDate: entry.earliestDate,
         };
       })
       .filter(entry => {
@@ -192,7 +196,6 @@ const CustomerLedger = () => {
           entry.sizes.toLowerCase().includes(query)
         );
       })
-      // Sort by earliest date in ascending order (oldest to newest)
       .sort((a, b) => a.earliestDate - b.earliestDate);
 
     const indexOfLastRow = currentPage * rowsPerPage;
@@ -232,9 +235,9 @@ const CustomerLedger = () => {
     const customer = customerSummary.find(item => item.customer === customerName);
     if (!customer) return { ledgerData: [], totalDebit: 0, totalCredit: 0 };
 
-    let runningBalance = 0;
-    const ledgerData = ledgerEntries
-      .filter(entry => entry.customerName === customerName)
+    let balance = 0;
+    const sortedEntries = ledgerEntries
+      .filter(entry => entry.customerName === customerName.toLowerCase()) // Normalize case
       .filter(entry => {
         const entryDate = parseDateSafely(entry.date);
         const { startDate, endDate } = ledgerFilterDates;
@@ -243,22 +246,28 @@ const CustomerLedger = () => {
         }
         return true;
       })
-      // Sort in ascending order (oldest to newest) and calculate running balance
-      .sort((a, b) => parseDateSafely(a.date) - parseDateSafely(b.date))
-      .map(entry => {
+      .sort((a, b) => parseDateSafely(a.createdAt) - parseDateSafely(b.createdAt))
+      .map((entry, index) => {
         const debit = parseFloat(entry.debit) || 0;
         const credit = parseFloat(entry.credit) || 0;
-        runningBalance += debit - credit;
+        balance += debit - credit;
         return {
-          ...entry,
-          balance: runningBalance.toFixed(2),
+          index: index + 1,
+          date: parseDateSafely(entry.date).toISOString().split('T')[0],
+          description: entry.narration || 'N/A',
+          invoice: entry.invoiceNumber || '-',
+          debit,
+          credit,
+          balance: balance,
+          balanceType: balance >= 0 ? 'Cr' : 'Dr',
+          balanceDisplay: Math.abs(balance),
         };
       });
 
-    const totalDebit = ledgerData.reduce((sum, entry) => sum + (parseFloat(entry.debit) || 0), 0);
-    const totalCredit = ledgerData.reduce((sum, entry) => sum + (parseFloat(entry.credit) || 0), 0);
+    const totalDebit = sortedEntries.reduce((sum, entry) => sum + (parseFloat(entry.debit) || 0), 0);
+    const totalCredit = sortedEntries.reduce((sum, entry) => sum + (parseFloat(entry.credit) || 0), 0);
 
-    return { ledgerData, totalDebit, totalCredit };
+    return { ledgerData: sortedEntries, totalDebit, totalCredit };
   };
 
   const getBrandsForCustomer = (customerName) => {
@@ -283,7 +292,7 @@ const CustomerLedger = () => {
     const brandDetail = brandDetails.find(detail => detail.customerName === customerName && detail.brand === brand && detail.size === size) || {};
     const totalPaid = parseFloat(brandDetail.totalPaid) || 0;
     const due = (totalCost - totalPaid).toFixed(2);
-    return { totalItems, totalCost: totalCost.toFixed(2), totalPaid };
+    return { totalItems, totalCost: totalCost.toFixed(2), totalPaid, due };
   };
 
   const openModal = (customer) => {
@@ -310,7 +319,7 @@ const CustomerLedger = () => {
       brand: '',
       size: '',
       totalBrands: 0,
-      totalItems: '',
+      totalItems: 0,
       totalCost: '',
       totalPaid: '',
       due: '',
@@ -409,6 +418,7 @@ const CustomerLedger = () => {
     }
 
     const todayDate = new Date().toISOString().split('T')[0];
+    const createdAt = new Date();
     let narration = '';
     let debit = 0;
     let credit = 0;
@@ -421,7 +431,7 @@ const CustomerLedger = () => {
         .filter(item => (item.customerName || 'N/A') === customerName && item.brand === brand && item.size === size)
         .sort((a, b) => parseDateSafely(b.date) - parseDateSafely(a.date))[0];
       if (latestSale) {
-        narration = `${latestSale.size || 'N/A'} ${latestSale.model || 'N/A'} ${latestSale.brand || 'N/A'} ${latestSale.quantity || 0}X${latestSale.price || 0}`;
+        narration = `${latestSale.size || 'N/A'} ${latestSale.model || 'N/A'} ${latestSale.brand || 'N/A'} ${latestSale.quantity || 0}X${parseFloat(latestSale.price || 0)}`;
       } else {
         narration = 'Debit Payment';
       }
@@ -494,7 +504,7 @@ const CustomerLedger = () => {
       }
 
       await addDoc(collection(db, 'customerLedgerEntries'), {
-        customerName,
+        customerName: customerName.toLowerCase(), // Normalize case
         brand,
         size,
         invoiceNumber: `RV${Date.now()}-${Math.floor(Math.random() * 1000)}`,
@@ -502,7 +512,7 @@ const CustomerLedger = () => {
         narration,
         debit,
         credit,
-        createdAt: new Date(),
+        createdAt,
       });
 
       sellData
@@ -511,7 +521,7 @@ const CustomerLedger = () => {
           const existingLedgerEntry = ledgerEntries.find(entry => entry.invoiceNumber === item.invoiceNumber);
           if (!existingLedgerEntry) {
             await addDoc(collection(db, 'customerLedgerEntries'), {
-              customerName,
+              customerName: customerName.toLowerCase(),
               brand: item.brand,
               size: item.size,
               invoiceNumber: item.invoiceNumber,
@@ -559,11 +569,13 @@ const CustomerLedger = () => {
             .header .account { font-size: 14px; margin: 5px 0; }
             .header .date-range { font-size: 14px; margin: 5px 0; }
             .header .date { font-size: 14px; margin: 5px 0; text-align: right; }
-            .header .page { font-size: 12px; color: #666; text-align: right; }
+            .header .page { font-size: 12px; color: #666; text-align: right; font-weight: bold; }
             table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-            th, td { border: 1px solid #000; padding: 8px; text-align: right; }
+            th, td { border: 1px solid #000; padding: 10px 8px; text-align: right; }
             th { background-color: #000; color: white; text-align: center; }
             td.text-left { text-align: left; }
+            .balance-cr { color: red; font-weight: bold; }
+            .balance-dr { color: green; font-weight: bold; }
             .total-row td { font-weight: bold; }
             .footer { margin-top: 20px; text-align: center; color: #666; font-size: 12px; }
           </style>
@@ -581,23 +593,23 @@ const CustomerLedger = () => {
             <table>
               <thead>
                 <tr>
-                  <th>Inv. #</th>
-                  <th>Inv. Date</th>
-                  <th>Narration</th>
-                  <th>Debit Rs.</th>
-                  <th>Credit Rs.</th>
-                  <th>Balance</th>
+                  <th>Date</th>
+                  <th>Description</th>
+                  <th>Invoice #</th>
+                  <th>Debit (PKR)</th>
+                  <th>Credit (PKR)</th>
+                  <th>Balance (PKR)</th>
                 </tr>
               </thead>
               <tbody>
                 ${ledgerData.map(entry => `
                   <tr>
-                    <td>${entry.invoiceNumber || 'N/A'}</td>
-                    <td>${parseDateSafely(entry.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' }).toUpperCase()}</td>
-                    <td class="text-left">${entry.narration || 'N/A'}</td>
-                    <td>${(parseFloat(entry.debit) || 0).toLocaleString()}</td>
-                    <td>${(parseFloat(entry.credit) || 0).toLocaleString()}</td>
-                    <td>${parseFloat(entry.balance).toLocaleString()}</td>
+                    <td>${entry.date}</td>
+                    <td class="text-left">${entry.description}</td>
+                    <td>${entry.invoice}</td>
+                    <td>${entry.debit > 0 ? `PKR ${entry.debit.toLocaleString()}` : '-'}</td>
+                    <td>${entry.credit > 0 ? `PKR ${entry.credit.toLocaleString()}` : '-'}</td>
+                    <td class="${entry.balance >= 0 ? 'balance-cr' : 'balance-dr'}">${entry.balanceDisplay.toLocaleString()} ${entry.balanceType}</td>
                   </tr>
                 `).join('')}
                 <tr class="total-row">
@@ -1041,36 +1053,45 @@ const CustomerLedger = () => {
               </div>
             </div>
             <div className="overflow-x-auto">
-              <table className="min-w-full border-collapse text-sm text-left bg-white rounded-xl shadow-sm">
+              <table className="min-w-full border-collapse text-sm bg-white rounded-xl shadow-sm">
                 <thead>
-                  <tr className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white">
-                    <th className="py-3 px-6 font-semibold border border-black">Inv.#</th>
-                    <th className="py-3 px-6 font-semibold border border-black">Inv. Date</th>
-                    <th className="py-3 px-6 font-semibold border border-black">Narration</th>
-                    <th className="py-3 px-6 font-semibold border border-black">Debit Rs.</th>
-                    <th className="py-3 px-6 font-semibold border border-black">Credit Rs.</th>
-                    <th className="py-3 px-6 font-semibold border border-black">Balance</th>
+                  <tr className="bg-gray-200">
+                    <th className="py-3 px-6 font-semibold border border-black text-left">Invoice #</th>
+                    <th className="py-3 px-6 font-semibold border border-black text-left">Date</th>
+                    <th className="py-3 px-6 font-semibold border border-black text-left">Description</th>
+                    <th className="py-3 px-6 font-semibold border border-black text-right">Debit (PKR)</th>
+                    <th className="py-3 px-6 font-semibold border border-black text-right">Credit (PKR)</th>
+                    <th className="py-3 px-6 font-semibold border border-black text-right">Balance (PKR)</th>
                   </tr>
                 </thead>
                 <tbody>
                   {getLedgerForCustomer(selectedCustomer.customer).ledgerData.map((entry, index) => (
-                    <tr key={index} className="border-b border-gray-200 hover:bg-gray-50 transition duration-200">
-                      <td className="py-3 px-6 border border-black">{entry.invoiceNumber}</td>
-                      <td className="py-3 px-6 border border-black">{parseDateSafely(entry.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' }).replace(/ /g, '-')}</td>
-                      <td className="py-3 px-6 border border-black">{entry.narration}</td>
-                      <td className="py-3 px-6 border border-black">{(parseFloat(entry.debit) || 0).toLocaleString()}</td>
-                      <td className="py-3 px-6 border border-black">{(parseFloat(entry.credit) || 0).toLocaleString()}</td>
-                      <td className="py-3 px-6 border border-black">{parseFloat(entry.balance).toLocaleString()}</td>
+                    <tr key={index} className={index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+                      <td className="py-3 px-6 border border-black">{entry.invoice}</td>
+                      <td className="py-3 px-6 border border-black">{entry.date}</td>
+                      <td className="py-3 px-6 border border-black text-left">{entry.description}</td>
+                      <td className="py-3 px-6 border border-black text-right">{entry.debit > 0 ? `PKR ${entry.debit.toLocaleString()}` : '-'}</td>
+                      <td className="py-3 px-6 border border-black text-right">{entry.credit > 0 ? `PKR ${entry.credit.toLocaleString()}` : '-'}</td>
+                      <td className="py-3 px-6 border border-black text-right">
+                        {entry.balance >= 0 ? (
+                          <span className="text-red-600 font-semibold">PKR {entry.balanceDisplay.toLocaleString()} Cr</span>
+                        ) : (
+                          <span className="text-green-600 font-semibold">PKR {entry.balanceDisplay.toLocaleString()} Dr</span>
+                        )}
+                      </td>
                     </tr>
                   ))}
                   <tr className="font-bold">
                     <td colSpan="3" className="py-3 px-6 border border-black text-right">Total:</td>
-                    <td className="py-3 px-6 border border-black">{getLedgerForCustomer(selectedCustomer.customer).totalDebit.toLocaleString()}</td>
-                    <td className="py-3 px-6 border border-black">{getLedgerForCustomer(selectedCustomer.customer).totalCredit.toLocaleString()}</td>
-                    <td className="py-3 px-6 border border-black"></td>
+                    <td className="py-3 px-6 border border-black text-right">{getLedgerForCustomer(selectedCustomer.customer).totalDebit.toLocaleString()}</td>
+                    <td className="py-3 px-6 border border-black text-right">{getLedgerForCustomer(selectedCustomer.customer).totalCredit.toLocaleString()}</td>
+                    <td className="py-3 px-6 border border-black text-right"></td>
                   </tr>
                 </tbody>
               </table>
+            </div>
+            <div className="footer mt-6 text-center text-gray-600 text-sm">
+              <p>Generated by SARHAD TYRE TRADERS</p>
             </div>
             <div className="flex justify-end gap-4 mt-6">
               <button
@@ -1085,9 +1106,6 @@ const CustomerLedger = () => {
               >
                 Close
               </button>
-            </div>
-            <div className="footer mt-4 text-center text-gray-500 text-sm">
-              Generated by SARHAD TYRE TRADERS
             </div>
           </div>
         )}
