@@ -170,7 +170,7 @@ const CustomerLedger = () => {
 
     const saleSummary = Object.values(saleSizeMap)
       .map(entry => {
-        const details = brandDetails.find(detail => item.customerName === customerName && detail.brand === entry.brand && detail.size === entry.size) || {};
+        const details = brandDetails.find(detail => detail.customerName === customerName && detail.brand === entry.brand && detail.size === entry.size) || {};
         const totalCost = entry.totalCost;
         const totalPaid = parseFloat(details.totalPaid) || 0;
         const due = (totalCost - entry.totalCost).toFixed(2);
