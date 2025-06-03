@@ -283,7 +283,7 @@ const CustomerLedger = () => {
     const brandDetail = brandDetails.find(detail => detail.customerName === customerName && detail.brand === brand && detail.size === size) || {};
     const totalPaid = parseFloat(brandDetail.totalPaid) || 0;
     const due = (totalCost - totalPaid).toFixed(2);
-    return { totalItems, totalCost: totalCost.toFixed(2), totalPaid, totalPaid };
+    return { totalItems, totalCost: totalCost.toFixed(2), totalPaid };
   };
 
   const openModal = (customer) => {
