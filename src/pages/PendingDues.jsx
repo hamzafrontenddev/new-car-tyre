@@ -132,7 +132,6 @@ const PendingDues = () => {
             <tr className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white">
               <th className="py-3 px-6 font-semibold">Customer Name</th>
               <th className="py-3 px-6 font-semibold">Phone Number</th>
-              <th className="py-3 px-6 font-semibold">Total Cost</th>
               <th className="py-3 px-6 font-semibold">Total Paid</th>
               <th className="py-3 px-6 font-semibold">Pending Dues</th>
               <th className="py-3 px-6 font-semibold">Date</th>
@@ -144,9 +143,6 @@ const PendingDues = () => {
                 <tr key={customer.id} className="border-b border-gray-200 hover:bg-gray-50 transition duration-200">
                   <td className="py-3 px-6">{customer.customerName}</td>
                   <td className="py-3 px-6">{customer.phone}</td>
-                  <td className="py-3 px-6 text-blue-700 font-semibold">
-                    Rs. {(parseFloat(customer.totalCost) || 0).toLocaleString()}
-                  </td>
                   <td className="py-3 px-6 text-green-700 font-semibold">
                     Rs. {(parseFloat(customer.totalPaid) || 0).toLocaleString()}
                   </td>
