@@ -24,9 +24,11 @@ const PendingDues = () => {
   const itemsPerPage = 5;
 
   useEffect(() => {
-    // Fetch users for phone numbers
     let usersMap = {};
-    const unsubscribeUsers = onSnapshot(collection(db, 'users'), (snapshot) => {
+    let unsubscribeUsers, unsubscribeCustomers, unsubscribeSales;
+
+    // Fetch users for phone numbers
+    unsubscribeUsers = onSnapshot(collection(db, 'users'), (snapshot) => {
       usersMap = snapshot.docs.reduce((map, doc) => {
         const data = doc.data();
         if (data.userType === 'Customer') {
@@ -34,25 +36,64 @@ const PendingDues = () => {
         }
         return map;
       }, {});
-      
-      // Fetch customerDetails with due > 0
-      const unsubscribeCustomers = onSnapshot(collection(db, 'customerDetails'), (snapshot) => {
-        let data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))
-          .filter(item => parseFloat(item.due || 0) > 0);
-        // Enrich data with phone numbers
-        data = data.map(item => ({
-          ...item,
-          phone: usersMap[item.customerName] || 'N/A'
-        }));
-        // Apply date range filter
-        data = filterByDateRange(data, startDate, endDate);
-        setPendingCustomers(data);
-      });
 
-      return () => unsubscribeCustomers();
+      // Fetch customerDetails with due > 0
+      unsubscribeCustomers = onSnapshot(collection(db, 'customerDetails'), (snapshot) => {
+        const customerDetailsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))
+          .filter(item => parseFloat(item.due || 0) > 0);
+
+        // Fetch sales data to calculate dues for customers not yet in customerDetails
+        unsubscribeSales = onSnapshot(collection(db, 'soldTyres'), (salesSnapshot) => {
+          // Aggregate sales by customer
+          const salesSummary = salesSnapshot.docs.reduce((acc, doc) => {
+            const data = doc.data();
+            const customerName = data.customerName || 'N/A';
+            const totalCost = (parseFloat(data.price) || 0) * (parseInt(data.quantity) || 0);
+            if (!acc[customerName]) {
+              acc[customerName] = {
+                totalCost: 0,
+                date: data.date,
+                earliestDate: data.date ? new Date(data.date) : new Date(),
+              };
+            }
+            acc[customerName].totalCost += totalCost;
+            if (data.date && new Date(data.date) < acc[customerName].earliestDate) {
+              acc[customerName].earliestDate = new Date(data.date);
+              acc[customerName].date = data.date;
+            }
+            return acc;
+          }, {});
+
+          // Combine customerDetails with sales data
+          const combinedData = Object.keys(salesSummary).map(customerName => {
+            const customerDetail = customerDetailsData.find(detail => detail.customerName === customerName) || {};
+            const totalCost = salesSummary[customerName].totalCost || 0;
+            const totalPaid = parseFloat(customerDetail.totalPaid) || 0;
+            const due = totalCost - totalPaid;
+            return {
+              id: customerDetail.id || customerName,
+              customerName,
+              totalCost: totalCost.toFixed(2),
+              totalPaid: totalPaid.toFixed(2),
+              due: due.toFixed(2),
+              date: salesSummary[customerName].date || new Date().toISOString().split('T')[0],
+              phone: usersMap[customerName] || 'N/A',
+            };
+          }).filter(item => parseFloat(item.due) > 0);
+
+          // Apply date range filter
+          const filteredData = filterByDateRange(combinedData, startDate, endDate);
+          setPendingCustomers(filteredData);
+        });
+      });
     });
 
-    return () => unsubscribeUsers();
+    return () => {
+  if (typeof unsubscribeUsers === 'function') unsubscribeUsers();
+  if (typeof unsubscribeCustomers === 'function') unsubscribeCustomers();
+  if (typeof unsubscribeSales === 'function') unsubscribeSales();
+};
+
   }, [startDate, endDate]);
 
   const filteredCustomers = pendingCustomers.filter((customer) =>
@@ -61,7 +102,7 @@ const PendingDues = () => {
       phone: customer.phone,
       totalCost: customer.totalCost,
       totalPaid: customer.totalPaid,
-      due: customer.due
+      due: customer.due,
     }).some((val) =>
       String(val).toLowerCase().includes(searchTerm.toLowerCase())
     )
@@ -132,6 +173,7 @@ const PendingDues = () => {
             <tr className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white">
               <th className="py-3 px-6 font-semibold">Customer Name</th>
               <th className="py-3 px-6 font-semibold">Phone Number</th>
+              <th className="py-3 px-6 font-semibold">Total Cost</th>
               <th className="py-3 px-6 font-semibold">Total Paid</th>
               <th className="py-3 px-6 font-semibold">Pending Dues</th>
               <th className="py-3 px-6 font-semibold">Date</th>
@@ -144,10 +186,13 @@ const PendingDues = () => {
                   <td className="py-3 px-6">{customer.customerName}</td>
                   <td className="py-3 px-6">{customer.phone}</td>
                   <td className="py-3 px-6 text-green-700 font-semibold">
-                    Rs. {(parseFloat(customer.totalPaid) || 0).toLocaleString()}
+                    Rs. {parseFloat(customer.totalCost).toLocaleString()}
+                  </td>
+                  <td className="py-3 px-6 text-green-700 font-semibold">
+                    Rs. {parseFloat(customer.totalPaid).toLocaleString()}
                   </td>
                   <td className="py-3 px-6 text-red-600 font-semibold">
-                    Rs. {(parseFloat(customer.due) || 0).toLocaleString()}
+                    Rs. {parseFloat(customer.due).toLocaleString()}
                   </td>
                   <td className="py-3 px-6">{customer.date}</td>
                 </tr>

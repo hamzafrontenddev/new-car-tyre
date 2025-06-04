@@ -24,9 +24,11 @@ const CompanyPendingDues = () => {
   const itemsPerPage = 5;
 
   useEffect(() => {
-    // Fetch users for phone numbers
     let usersMap = {};
-    const unsubscribeUsers = onSnapshot(collection(db, 'users'), (snapshot) => {
+    let unsubscribeUsers, unsubscribeCompanies, unsubscribePurchases;
+
+    // Fetch users for phone numbers
+    unsubscribeUsers = onSnapshot(collection(db, 'users'), (snapshot) => {
       usersMap = snapshot.docs.reduce((map, doc) => {
         const data = doc.data();
         if (data.userType === 'Company') {
@@ -34,25 +36,65 @@ const CompanyPendingDues = () => {
         }
         return map;
       }, {});
-      
-      // Fetch companyDetails with due > 0
-      const unsubscribeCompanies = onSnapshot(collection(db, 'companyDetails'), (snapshot) => {
-        let data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))
-          .filter(item => parseFloat(item.due || 0) > 0);
-        // Enrich data with phone numbers
-        data = data.map(item => ({
-          ...item,
-          phone: usersMap[item.companyName] || 'N/A'
-        }));
-        // Apply date range filter
-        data = filterByDateRange(data, startDate, endDate);
-        setPendingCompanies(data);
-      });
 
-      return () => unsubscribeCompanies();
+      // Fetch companyDetails
+      unsubscribeCompanies = onSnapshot(collection(db, 'companyDetails'), (snapshot) => {
+        const companyDetailsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+
+        // Fetch purchases to calculate dues
+        unsubscribePurchases = onSnapshot(collection(db, 'purchasedTyres'), (purchasesSnapshot) => {
+          // Aggregate purchases by company
+          const purchaseSummary = purchasesSnapshot.docs.reduce((acc, doc) => {
+            const data = doc.data();
+            const companyName = data.company || 'N/A';
+            const totalCost = parseFloat(data.totalPrice) || (parseFloat(data.price) || 0) * (parseInt(data.quantity) || 0);
+            if (!acc[companyName]) {
+              acc[companyName] = {
+                totalCost: 0,
+                date: data.date,
+                earliestDate: data.date ? new Date(data.date) : new Date(),
+              };
+            }
+            acc[companyName].totalCost += totalCost;
+            if (data.date && new Date(data.date) < acc[companyName].earliestDate) {
+              acc[companyName].earliestDate = new Date(data.date);
+              acc[companyName].date = data.date;
+            }
+            return acc;
+          }, {});
+
+          // Combine companyDetails with purchase data
+          const combinedData = Object.keys(purchaseSummary).map(companyName => {
+            const companyDetail = companyDetailsData.find(detail => detail.companyName === companyName) || {};
+            const totalCost = purchaseSummary[companyName].totalCost || 0;
+            const totalPaid = parseFloat(companyDetail.totalPaid) || 0;
+            const due = totalCost - totalPaid;
+            return {
+              id: companyDetail.id || companyName,
+              companyName,
+              totalCost: totalCost.toFixed(2),
+              totalPaid: totalPaid.toFixed(2),
+              due: due.toFixed(2),
+              date: purchaseSummary[companyName].date || new Date().toISOString().split('T')[0],
+              phone: usersMap[companyName] || 'N/A',
+            };
+          }).filter(item => parseFloat(item.due) > 0);
+
+          // Apply date range filter
+          const filteredData = filterByDateRange(combinedData, startDate, endDate);
+          setPendingCompanies(filteredData);
+        });
+      });
     });
 
-    return () => unsubscribeUsers();
+
+
+    return () => {
+      if (typeof unsubscribeUsers === 'function') unsubscribeUsers();
+      if (typeof unsubscribeCompanies === 'function') unsubscribeCompanies();
+      if (typeof unsubscribePurchases === 'function') unsubscribePurchases();
+    };
+
   }, [startDate, endDate]);
 
   const filteredCompanies = pendingCompanies.filter((company) =>
@@ -61,7 +103,7 @@ const CompanyPendingDues = () => {
       phone: company.phone,
       totalCost: company.totalCost,
       totalPaid: company.totalPaid,
-      due: company.due
+      due: company.due,
     }).some((val) =>
       String(val).toLowerCase().includes(searchTerm.toLowerCase())
     )
@@ -76,7 +118,7 @@ const CompanyPendingDues = () => {
 
   return (
     <div className="max-w-8xl mx-auto p-6 bg-gradient-to-b from-gray-50 to-gray-100 min-h-screen">
-      <h2 className="text-3xl font-bold text-gray-800 mb-6 bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">
+      <h2 className="text-3xl font-bold mb-6 bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">
         Company Pending Dues
       </h2>
 
@@ -132,6 +174,7 @@ const CompanyPendingDues = () => {
             <tr className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white">
               <th className="py-3 px-6 font-semibold">Company Name</th>
               <th className="py-3 px-6 font-semibold">Phone Number</th>
+              <th className="py-3 px-6 font-semibold">Total Cost</th>
               <th className="py-3 px-6 font-semibold">Total Paid</th>
               <th className="py-3 px-6 font-semibold">Pending Dues</th>
               <th className="py-3 px-6 font-semibold">Date</th>
@@ -144,10 +187,13 @@ const CompanyPendingDues = () => {
                   <td className="py-3 px-6">{company.companyName}</td>
                   <td className="py-3 px-6">{company.phone}</td>
                   <td className="py-3 px-6 text-green-700 font-semibold">
-                    Rs. {(parseFloat(company.totalPaid) || 0).toLocaleString()}
+                    Rs. {parseFloat(company.totalCost).toLocaleString()}
+                  </td>
+                  <td className="py-3 px-6 text-green-700 font-semibold">
+                    Rs. {parseFloat(company.totalPaid).toLocaleString()}
                   </td>
                   <td className="py-3 px-6 text-red-600 font-semibold">
-                    Rs. {(parseFloat(company.due) || 0).toLocaleString()}
+                    Rs. {parseFloat(company.due).toLocaleString()}
                   </td>
                   <td className="py-3 px-6">{company.date}</td>
                 </tr>
@@ -169,9 +215,8 @@ const CompanyPendingDues = () => {
           <button
             key={number}
             onClick={() => paginate(number)}
-            className={`px-4 py-2 rounded-xl ${
-              currentPage === number ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-            } transition duration-200`}
+            className={`px-4 py-2 rounded-xl ${currentPage === number ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+              } transition duration-200`}
           >
             {number}
           </button>
