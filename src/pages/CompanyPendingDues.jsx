@@ -21,80 +21,116 @@ const CompanyPendingDues = () => {
   const [currentPage, setCurrentPage] = useState(1);
   const [startDate, setStartDate] = useState(null);
   const [endDate, setEndDate] = useState(null);
-  const itemsPerPage = 5;
+  const itemsPerPage = 30;
 
   useEffect(() => {
     let usersMap = {};
-    let unsubscribeUsers, unsubscribeCompanies, unsubscribePurchases;
+    let unsubscribeUsers, unsubscribeLedger, unsubscribePurchases;
 
     // Fetch users for phone numbers
-    unsubscribeUsers = onSnapshot(collection(db, 'users'), (snapshot) => {
-      usersMap = snapshot.docs.reduce((map, doc) => {
-        const data = doc.data();
-        if (data.userType === 'Company') {
-          map[data.name] = data.mobile;
-        }
-        return map;
-      }, {});
+    unsubscribeUsers = onSnapshot(
+      collection(db, 'users'),
+      (snapshot) => {
+        usersMap = snapshot.docs.reduce((map, doc) => {
+          const data = doc.data();
+          if (data.userType === 'Company') {
+            map[data.name.toLowerCase()] = data.mobile;
+          }
+          return map;
+        }, {});
+      },
+      (error) => {
+        console.error('Error fetching users:', error);
+        toast.error('Failed to fetch user data');
+      }
+    );
 
-      // Fetch companyDetails
-      unsubscribeCompanies = onSnapshot(collection(db, 'companyDetails'), (snapshot) => {
-        const companyDetailsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    // Fetch companyLedgerEntries for totalPaid
+    unsubscribeLedger = onSnapshot(
+      collection(db, 'companyLedgerEntries'),
+      (ledgerSnapshot) => {
+        const ledgerData = ledgerSnapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data(),
+          date: doc.data().date?.toDate ? doc.data().date.toDate() : new Date(doc.data().date || Date.now()),
+        }));
 
-        // Fetch purchases to calculate dues
-        unsubscribePurchases = onSnapshot(collection(db, 'purchasedTyres'), (purchasesSnapshot) => {
-          // Aggregate purchases by company
-          const purchaseSummary = purchasesSnapshot.docs.reduce((acc, doc) => {
-            const data = doc.data();
-            const companyName = data.company || 'N/A';
-            const totalCost = parseFloat(data.totalPrice) || (parseFloat(data.price) || 0) * (parseInt(data.quantity) || 0);
-            if (!acc[companyName]) {
-              acc[companyName] = {
-                totalCost: 0,
-                date: data.date,
-                earliestDate: data.date ? new Date(data.date) : new Date(),
+        // Fetch purchases to calculate totalCost
+        unsubscribePurchases = onSnapshot(
+          collection(db, 'purchasedTyres'),
+          (purchasesSnapshot) => {
+            // Aggregate purchases by company
+            const purchaseSummary = purchasesSnapshot.docs.reduce((acc, doc) => {
+              const data = doc.data();
+              const companyName = (data.company || 'N/A').toLowerCase();
+              const totalCost = parseFloat(data.totalPrice) || (parseFloat(data.price) || 0) * (parseInt(data.quantity) || 0);
+              const date = data.date ? new Date(data.date) : new Date();
+
+              if (!acc[companyName]) {
+                acc[companyName] = {
+                  totalCost: 0,
+                  date: date.toISOString().split('T')[0],
+                  earliestDate: date,
+                };
+              }
+              acc[companyName].totalCost += totalCost;
+              if (date < acc[companyName].earliestDate) {
+                acc[companyName].earliestDate = date;
+                acc[companyName].date = date.toISOString().split('T')[0];
+              }
+              return acc;
+            }, {});
+
+            // Aggregate totalPaid from companyLedgerEntries
+            const ledgerSummary = ledgerData.reduce((acc, entry) => {
+              const companyName = (entry.companyName || 'N/A').toLowerCase();
+              if (!acc[companyName]) {
+                acc[companyName] = { totalPaid: 0 };
+              }
+              acc[companyName].totalPaid += parseFloat(entry.credit) || 0;
+              return acc;
+            }, {});
+
+            // Combine data
+            const combinedData = Object.keys(purchaseSummary).map(companyName => {
+              const totalCost = purchaseSummary[companyName].totalCost || 0;
+              const totalPaid = ledgerSummary[companyName]?.totalPaid || 0;
+              const due = totalCost - totalPaid;
+              return {
+                id: companyName,
+                companyName: companyName.charAt(0).toUpperCase() + companyName.slice(1), // Capitalize for display
+                totalCost: totalCost.toFixed(2),
+                totalPaid: totalPaid.toFixed(2),
+                due: due.toFixed(2),
+                date: purchaseSummary[companyName].date,
+                phone: usersMap[companyName] || 'N/A',
               };
-            }
-            acc[companyName].totalCost += totalCost;
-            if (data.date && new Date(data.date) < acc[companyName].earliestDate) {
-              acc[companyName].earliestDate = new Date(data.date);
-              acc[companyName].date = data.date;
-            }
-            return acc;
-          }, {});
+            }).filter(item => parseFloat(item.due) > 0);
 
-          // Combine companyDetails with purchase data
-          const combinedData = Object.keys(purchaseSummary).map(companyName => {
-            const companyDetail = companyDetailsData.find(detail => detail.companyName === companyName) || {};
-            const totalCost = purchaseSummary[companyName].totalCost || 0;
-            const totalPaid = parseFloat(companyDetail.totalPaid) || 0;
-            const due = totalCost - totalPaid;
-            return {
-              id: companyDetail.id || companyName,
-              companyName,
-              totalCost: totalCost.toFixed(2),
-              totalPaid: totalPaid.toFixed(2),
-              due: due.toFixed(2),
-              date: purchaseSummary[companyName].date || new Date().toISOString().split('T')[0],
-              phone: usersMap[companyName] || 'N/A',
-            };
-          }).filter(item => parseFloat(item.due) > 0);
+            // Apply date range filter
+            const filteredData = filterByDateRange(combinedData, startDate, endDate);
+            setPendingCompanies(filteredData);
 
-          // Apply date range filter
-          const filteredData = filterByDateRange(combinedData, startDate, endDate);
-          setPendingCompanies(filteredData);
-        });
-      });
-    });
-
-
+            // Debug logging
+            console.log('Pending Companies:', filteredData);
+          },
+          (error) => {
+            console.error('Error fetching purchases:', error);
+            toast.error('Failed to fetch purchase data');
+          }
+        );
+      },
+      (error) => {
+        console.error('Error fetching ledger entries:', error);
+        toast.error('Failed to fetch ledger data');
+      }
+    );
 
     return () => {
       if (typeof unsubscribeUsers === 'function') unsubscribeUsers();
-      if (typeof unsubscribeCompanies === 'function') unsubscribeCompanies();
+      if (typeof unsubscribeLedger === 'function') unsubscribeLedger();
       if (typeof unsubscribePurchases === 'function') unsubscribePurchases();
     };
-
   }, [startDate, endDate]);
 
   const filteredCompanies = pendingCompanies.filter((company) =>

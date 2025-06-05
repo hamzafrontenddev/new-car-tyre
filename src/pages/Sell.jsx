@@ -33,6 +33,7 @@ const SellTyre = () => {
     price: "",
     quantity: "",
     discount: "",
+    due: "",
     shopQuantity: "",
     comment: "",
     customerName: "",
@@ -87,27 +88,27 @@ const SellTyre = () => {
           <head>
             <title>Print Invoice</title>
             <style>
+              body { font-family: Arial, sans-serif; padding: 20px; }
+              .invoice-container { max-width: 800px; margin: auto; }
+              .header { text-align: center; margin-bottom: 24px; border-bottom: 2px solid #2563eb; padding-bottom: 16px; }
+              .header h1 { font-size: 1.875rem; font-weight: 700; color: #2563eb; }
+              .invoice-info { display: flex; justify-content: space-between; margin-top: 8px; color: #4b5563; }
+              .section { margin-bottom: 24px; }
+              .section-title { font-size: 1.25rem; font-weight: 600; color: #2563eb; margin-bottom: 12px; }
+              .customer-details { display: grid; gap: 8px; color: #374151; }
+              .customer-details p { margin: 0; }
+              table { width: 100%; border-collapse: collapse; }
+              th, td { border: 1px solid #e5e7eb; padding: 8px; text-align: left; }
+              th { background-color: #f9fafb; font-weight: 600; color: #374151; }
+              tbody tr:hover { background-color: #f9fafb; }
+              .total-section { display: flex; justify-content: flex-end; }
+              .total-box { background-color: #f9fafb; padding: 16px; border-radius: 8px; width: 20rem; }
+              .total-box p { font-weight: 700; margin: 4px 0; }
+              .footer { text-align: center; margin-top: 24px; padding-top: 16px; border-top: 1px solid #e5e7eb; color: #4b5563; }
+              .footer p { margin: 4px 0; }
+              .status { font-weight: 600; color: #16a34a; }
               @media print {
-                @page { margin: 20mm; }
-                body { font-family: 'Helvetica Neue', Arial, sans-serif; margin: 0; color: #1f2937; font-size: 12pt; }
-                .invoice-container { max-width: 800px; margin: 0 auto; padding: 20px; background: #fff; }
-                .header { text-align: center; margin-bottom: 20px; border-bottom: 2px solid #1e40af; padding-bottom: 10px; }
-                .header h1 { font-size: 24pt; font-weight: 700; color: #1e40af; margin: 0; }
-                .header .invoice-info { color: #64748b; margin-top: 10px; }
-                .section { margin-bottom: 20px; }
-                .section-title { font-size: 16pt; font-weight: 600; color: #1e40af; margin-bottom: 10px; }
-                .customer-details { display: grid; grid-template-columns: 1fr; gap: 5px; }
-                .customer-details p { margin: 0; color: #374151; }
-                table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
-                th, td { border: 1px solid #e2e8f0; padding: 8px 12px; text-align: left; }
-                th { background-color: #f8fafc; font-weight: 600; color: #1f2937; }
-                td { color: #374151; }
-                .total-section { display: flex; justify-content: flex-end; }
-                .total-box { width: 300px; background: #f8fafc; padding: 10px; border-radius: 8px; }
-                .total-box p { margin: 5px 0; color: #374151; font-weight: 600; font-size: 14pt; color: #1e40af; }
-                .footer { text-align: center; margin-top: 20px; color: #64748b; font-size: 10pt; border-top: 1px solid #e2e8f0; padding-top: 10px; }
-                .status { font-weight: 600; color: #059669; }
-                .no-page-break { page-break-inside: avoid; }
+                .no-print { display: none; }
               }
             </style>
           </head>
@@ -190,7 +191,7 @@ const SellTyre = () => {
     if (editingTyres) {
       setFormItems(editingTyres.map(item => ({
         ...item,
-        totalPrice: ((parseFloat(item.price) || 0) - (parseFloat(item.discount) || 0)) * (parseInt(item.quantity) || 0),
+        totalPrice: ((parseFloat(item.price) || 0) - (parseFloat(item.discount) || 0)) * (parseInt(item.quantity) || 0) - (parseFloat(item.due) || 0),
       })));
       setCustomerSearch(editingTyres[0]?.customerName || "");
       editingTyres.forEach((tyre, index) => {
@@ -205,6 +206,7 @@ const SellTyre = () => {
             price: tyre.price || "",
             quantity: tyre.quantity || "",
             discount: tyre.discount || "",
+            due: tyre.due || "",
             date: tyre.date || new Date().toISOString().split("T")[0],
           };
           return newItems;
@@ -221,8 +223,9 @@ const SellTyre = () => {
       const price = parseFloat(newItems[index].price) || 0;
       const quantity = parseInt(newItems[index].quantity) || 0;
       const discount = parseFloat(newItems[index].discount) || 0;
+      const due = parseFloat(newItems[index].due) || 0;
       const discountedPrice = price - discount;
-      newItems[index].totalPrice = discountedPrice >= 0 ? discountedPrice * quantity : 0;
+      newItems[index].totalPrice = discountedPrice >= 0 ? (discountedPrice * quantity - due) : 0;
       return newItems;
     });
   };
@@ -237,7 +240,7 @@ const SellTyre = () => {
     setCustomerSearch(e.target.value);
     setIsCustomerDropdownOpen(true);
     if (!e.target.value) {
-      setFormItems((prev) => prev.map(item => ({ ...item, customerName: "" })));
+      setFormItems(prev => prev.map(item => ({ ...item, customerName: "" })));
     }
   };
 
@@ -258,6 +261,7 @@ const SellTyre = () => {
         price: "",
         quantity: newItems[index].quantity || "",
         discount: newItems[index].discount || "",
+        due: newItems[index].due || "",
         shopQuantity: "",
         comment: newItems[index].comment || "",
         totalPrice: 0,
@@ -294,6 +298,7 @@ const SellTyre = () => {
         price: "",
         quantity: newItems[index].quantity || "",
         discount: newItems[index].discount || "",
+        due: newItems[index].due || "",
         shopQuantity: "",
         comment: newItems[index].comment || "",
         totalPrice: 0,
@@ -331,6 +336,7 @@ const SellTyre = () => {
         price: "",
         quantity: newItems[index].quantity || "",
         discount: newItems[index].discount || "",
+        due: newItems[index].due || "",
         shopQuantity: "",
         comment: newItems[index].comment || "",
         totalPrice: 0,
@@ -356,7 +362,7 @@ const SellTyre = () => {
           ...newItems[index],
           size: firstMatch.size || "",
           price: firstMatch.price || "",
-          totalPrice: ((parseFloat(firstMatch.price) || 0) - (parseFloat(newItems[index].discount) || 0)) * (parseInt(newItems[index].quantity) || 0),
+          totalPrice: ((parseFloat(firstMatch.price) || 0) - (parseFloat(newItems[index].discount) || 0)) * (parseInt(newItems[index].quantity) || 0) - (parseFloat(newItems[index].due) || 0),
         };
         return newItems;
       });
@@ -410,8 +416,9 @@ const SellTyre = () => {
           ...newItems[index],
           size,
           price: match.price || "",
+          due: newItems[index].due || "",
           comment: newItems[index].comment || "",
-          totalPrice: ((parseFloat(match.price) || 0) - (parseFloat(newItems[index].discount) || 0)) * (parseInt(newItems[index].quantity) || 0),
+          totalPrice: ((parseFloat(match.price) || 0) - (parseFloat(newItems[index].discount) || 0)) * (parseInt(newItems[index].quantity) || 0) - (parseFloat(newItems[index].due) || 0),
         };
         return newItems;
       });
@@ -449,6 +456,7 @@ const SellTyre = () => {
           ...newItems[index],
           size,
           shopQuantity: "",
+          due: newItems[index].due || "",
           comment: newItems[index].comment || "",
           totalPrice: 0,
         };
@@ -481,7 +489,7 @@ const SellTyre = () => {
 
       const enteredQty = parseInt(item.quantity);
       if (enteredQty <= 0) {
-        toast.error(`Quantity must be greater than 0 for item ${index + 1}`);
+        toast.error(`❌ Quantity must be greater than 0 for item ${index + 1}`);
         return;
       }
 
@@ -540,61 +548,55 @@ const SellTyre = () => {
         let remainingQty = parseInt(item.quantity);
         for (const tyre of purchasedTyres) {
           if (remainingQty <= 0) break;
-          const currentShop = parseInt(tyre.shop) || 0;
-          const deductQty = Math.min(currentShop, remainingQty);
+          const currentShopQty = parseInt(tyre.shop) || 0;
+          if (currentShopQty <= 0) continue;
+
+          const qtyToDeduct = Math.min(remainingQty, currentShopQty);
+          const newShopQty = currentShopQty - qtyToDeduct;
           await updateDoc(doc(db, "purchasedTyres", tyre.id), {
-            shop: currentShop - deductQty,
+            shop: newShopQty.toString(),
           });
-          remainingQty -= deductQty;
+          remainingQty -= qtyToDeduct;
         }
 
-        const originalPrice = parseFloat(item.price);
-        const discount = parseFloat(item.discount) || 0;
-        const discountedPrice = originalPrice - discount;
-
-        if (discountedPrice < 0) {
-          toast.error(`Discount cannot exceed the original price for item ${item.company} ${item.brand}`);
-          return;
-        }
-
-        const totalPrice = discountedPrice * parseInt(item.quantity);
-
-        const newTyre = {
-          ...item,
-          price: discountedPrice,
-          quantity: parseInt(item.quantity),
-          status: "Sold",
-          createdAt: editTransactionId ? item.createdAt || new Date() : new Date(),
-          discount,
-          payableAmount: totalPrice,
+        const saleData = {
           transactionId: newTransactionId,
-          date,
+          company: item.company,
+          brand: item.brand,
+          model: item.model,
+          size: item.size,
+          price: parseFloat(item.price) || 0,
+          quantity: parseInt(item.quantity) || 0,
+          discount: parseFloat(item.discount) || 0,
+          due: parseFloat(item.due) || 0,
           comment: item.comment || "",
+          customerName: item.customerName,
+          date,
+          createdAt: new Date(),
+          payableAmount: ((parseFloat(item.price) || 0) - (parseFloat(item.discount) || 0)) * (parseInt(item.quantity) || 0),
         };
 
-        if (editTransactionId && item.id) {
-          await updateDoc(doc(db, "soldTyres", item.id), {
-            ...newTyre,
-            payableAmount: totalPrice,
-          });
+        if (editTransactionId) {
+          const existingDocs = await getDocs(
+            query(collection(db, "soldTyres"), where("transactionId", "==", editTransactionId))
+          );
+          for (const existingDoc of existingDocs.docs) {
+            await updateDoc(doc(db, "soldTyres", existingDoc.id), saleData);
+          }
         } else {
-          await addDoc(collection(db, "soldTyres"), newTyre);
+          await addDoc(collection(db, "soldTyres"), saleData);
         }
       }
 
-      toast.success(`Transaction ${editTransactionId ? "updated" : "created"} successfully`);
       setFormItems([initialItemState]);
       setCustomerSearch("");
       setEditTransactionId(null);
       setEditingTyres(null);
-      setAvailableBrands([]);
-      setAvailableModels([]);
-      setAvailableSizes([]);
       setTransactionId(null);
-      setCurrentPage(1);
+      toast.success(editTransactionId ? "✅ Transaction updated successfully!" : "✅ Tyres sold successfully!");
     } catch (error) {
-      console.error("Error saving transaction:", error);
-      toast.error("Failed to save transaction: " + error.message);
+      console.error("Error saving sale:", error);
+      toast.error("Failed to save sale: " + error.message);
     }
   };
 
@@ -637,6 +639,7 @@ const SellTyre = () => {
     quantities: items.map(item => item.quantity).join(", "),
     prices: items.map(item => `Rs. ${item.price.toFixed(2)}`).join(", "),
     discounts: items.map(item => `Rs. ${item.discount || 0}`).join(", "),
+    comment: items[0]?.comment || "",
     totalPayable: items.reduce((sum, item) => sum + (item.payableAmount || item.price * item.quantity), 0),
   }));
 
@@ -652,12 +655,19 @@ const SellTyre = () => {
     return customer ? { address: customer.address, phone: customer.phone } : { address: "Not provided", phone: "Not provided" };
   };
 
-  return (
-    <div className="container mx-auto p-6 bg-gray-50 min-h-screen">
-      <h1 className="text-3xl font-bold text-blue-600 mb-6">🛒 Sell Tyres</h1>
+  const calculateInvoiceTotals = (items) => {
+    const totalDues = items.reduce((sum, item) => sum + (parseFloat(item.due) || 0), 0);
+    const totalPayable = items.reduce((sum, item) => sum + (item.payableAmount || item.price * item.quantity), 0);
+    const totalPaid = totalPayable - totalDues;
+    return { totalDues, totalPaid, totalPayable };
+  };
 
-      <div className="bg-white p-6 rounded-lg shadow-md mb-6">
-        <label className="block text-sm font-medium text-gray-700 mb-2">Customer Name</label>
+  return (
+    <div className="container mx-auto p-4">
+      <h1 className="text-2xl font-bold mb-4">🛒 Sell Tyres</h1>
+
+      <div className="mb-4">
+        <label className="block text-gray-700 font-semibold mb-2">Customer Name</label>
         <input
           type="text"
           value={customerSearch}
@@ -667,7 +677,7 @@ const SellTyre = () => {
           placeholder="Search customer..."
         />
         {isCustomerDropdownOpen && (
-          <div ref={customerDropdownRef} className="absolute bg-white border border-gray-300 rounded-lg shadow-lg mt-1 w-64 max-h-40 overflow-y-auto z-10">
+          <div ref={customerDropdownRef} className="absolute bg-white border border-gray-300 rounded-lg mt-1 w-64 max-h-60 overflow-y-auto z-10">
             {filteredCustomers.length > 0 ? (
               filteredCustomers.map((customer, idx) => (
                 <div
@@ -686,11 +696,11 @@ const SellTyre = () => {
       </div>
 
       {formItems.map((item, index) => (
-        <div key={index} className="bg-white p-6 rounded-lg shadow-md mb-4">
-          <h2 className="text-lg font-semibold text-gray-800 mb-4">Item {index + 1}</h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div key={index} className="border p-4 rounded-lg mb-4">
+          <h2 className="text-lg font-semibold mb-2">Item {index + 1}</h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700">Company</label>
+              <label className="block text-gray-700 font-semibold mb-2">Company</label>
               <select
                 name="company"
                 value={item.company}
@@ -699,12 +709,15 @@ const SellTyre = () => {
               >
                 <option value="">Select Company</option>
                 {availableCompanies.map((company, idx) => (
-                  <option key={idx} value={company}>{company}</option>
+                  <option key={idx} value={company}>
+                    {company}
+                  </option>
                 ))}
               </select>
             </div>
+
             <div>
-              <label className="block text-sm font-medium text-gray-700">Brand</label>
+              <label className="block text-gray-700 font-semibold mb-2">Brand</label>
               <select
                 name="brand"
                 value={item.brand}
@@ -713,12 +726,15 @@ const SellTyre = () => {
               >
                 <option value="">Select Brand</option>
                 {availableBrands.map((brand, idx) => (
-                  <option key={idx} value={brand}>{brand}</option>
+                  <option key={idx} value={brand}>
+                    {brand}
+                  </option>
                 ))}
               </select>
             </div>
+
             <div>
-              <label className="block text-sm font-medium text-gray-700">Model</label>
+              <label className="block text-gray-700 font-semibold mb-2">Model</label>
               <select
                 name="model"
                 value={item.model}
@@ -727,12 +743,15 @@ const SellTyre = () => {
               >
                 <option value="">Select Model</option>
                 {availableModels.map((model, idx) => (
-                  <option key={idx} value={model}>{model}</option>
+                  <option key={idx} value={model}>
+                    {model}
+                  </option>
                 ))}
               </select>
             </div>
+
             <div>
-              <label className="block text-sm font-medium text-gray-700">Size</label>
+              <label className="block text-gray-700 font-semibold mb-2">Size</label>
               <select
                 name="size"
                 value={item.size}
@@ -741,14 +760,17 @@ const SellTyre = () => {
               >
                 <option value="">Select Size</option>
                 {availableSizes.map((size, idx) => (
-                  <option key={idx} value={size}>{size}</option>
+                  <option key={idx} value={size}>
+                    {size}
+                  </option>
                 ))}
               </select>
             </div>
+
             <div>
-              <label className="block text-sm font-medium text-gray-700">Price</label>
+              <label className="block text-gray-700 font-semibold mb-2">Price</label>
               <input
-                type="number"
+                type="text"
                 name="price"
                 value={item.price}
                 onChange={(e) => handleChange(e, index)}
@@ -756,8 +778,9 @@ const SellTyre = () => {
                 readOnly
               />
             </div>
+
             <div>
-              <label className="block text-sm font-medium text-gray-700">Quantity</label>
+              <label className="block text-gray-700 font-semibold mb-2">Quantity</label>
               <input
                 type="number"
                 name="quantity"
@@ -766,8 +789,9 @@ const SellTyre = () => {
                 className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-400 focus:outline-none"
               />
             </div>
+
             <div>
-              <label className="block text-sm font-medium text-gray-700">Discount</label>
+              <label className="block text-gray-700 font-semibold mb-2">Discount</label>
               <input
                 type="number"
                 name="discount"
@@ -776,28 +800,41 @@ const SellTyre = () => {
                 className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-400 focus:outline-none"
               />
             </div>
+
             <div>
-              <label className="block text-sm font-medium text-gray-700">Total Price</label>
+              <label className="block text-gray-700 font-semibold mb-2">Due</label>
               <input
                 type="number"
-                name="totalPrice"
-                value={item.totalPrice.toFixed(2)}
-                className="w-full p-2 border border-gray-300 rounded-lg bg-gray-100 cursor-not-allowed"
-                readOnly
+                name="due"
+                value={item.due}
+                onChange={(e) => handleChange(e, index)}
+                className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-400 focus:outline-none"
+                placeholder="Enter due amount"
               />
             </div>
+
             <div>
-              <label className="block text-sm font-medium text-gray-700">Shop Quantity</label>
+              <label className="block text-gray-700 font-semibold mb-2">Total Price</label>
               <input
-                type="number"
-                name="shopQuantity"
+                type="text"
+                value={`Rs. ${item.totalPrice.toLocaleString()}`}
+                readOnly
+                className="w-full p-2 border border-gray-300 rounded-lg bg-gray-100 cursor-not-allowed"
+              />
+            </div>
+
+            <div>
+              <label className="block text-gray-700 font-semibold mb-2">Shop Quantity</label>
+              <input
+                type="text"
                 value={item.shopQuantity}
-                className="w-full p-2 border border-gray-300 rounded-lg bg-gray-100 cursor-not-allowed"
                 readOnly
+                className="w-full p-2 border border-gray-300 rounded-lg bg-gray-100 cursor-not-allowed"
               />
             </div>
+
             <div>
-              <label className="block text-sm font-medium text-gray-700">Date</label>
+              <label className="block text-gray-700 font-semibold mb-2">Date</label>
               <input
                 type="date"
                 name="date"
@@ -806,8 +843,9 @@ const SellTyre = () => {
                 className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-400 focus:outline-none"
               />
             </div>
+
             <div>
-              <label className="block text-sm font-medium text-gray-700">Comment</label>
+              <label className="block text-gray-700 font-semibold mb-2">Comment</label>
               <input
                 type="text"
                 name="comment"
@@ -817,6 +855,7 @@ const SellTyre = () => {
               />
             </div>
           </div>
+
           {formItems.length > 1 && (
             <button
               onClick={() => removeItem(index)}
@@ -827,7 +866,8 @@ const SellTyre = () => {
           )}
         </div>
       ))}
-      <div className="flex space-x-4 mb-6">
+
+      <div className="flex justify-between mt-4">
         <button
           onClick={addItem}
           className="px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition"
@@ -843,23 +883,23 @@ const SellTyre = () => {
       </div>
 
       {showConfirmPopup && (
-        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center z-50">
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white p-6 rounded-lg shadow-lg max-w-md w-full">
-            <h2 className="text-xl font-bold text-gray-800 mb-4">Confirm Transaction</h2>
+            <h2 className="text-xl font-bold mb-4">Confirm Transaction</h2>
             <div className="mb-4">
-              <p className="text-gray-700"><strong>Customer:</strong> {formItems[0]?.customerName || "N/A"}</p>
-              <p className="text-gray-700 mt-2"><strong>Items:</strong></p>
-              <ul className="list-disc pl-5 text-gray-700">
+              <p><strong>Customer:</strong> {formItems[0]?.customerName || "N/A"}</p>
+              <p><strong>Items:</strong></p>
+              <ul className="list-disc pl-5">
                 {formItems.map((item, idx) => (
                   <li key={idx}>
                     {item.company} {item.brand} {item.model} ({item.size}) - Qty: {item.quantity}, Total: Rs. {item.totalPrice?.toLocaleString() || 0}
                   </li>
                 ))}
               </ul>
-              <p className="text-gray-700 mt-2"><strong>Total:</strong> Rs. {formItems.reduce((sum, item) => sum + (item.totalPrice || 0), 0).toLocaleString()}</p>
+              <p><strong>Total:</strong> Rs. {formItems.reduce((sum, item) => sum + (item.totalPrice || 0), 0).toLocaleString()}</p>
             </div>
-            <p className="text-gray-600 mb-4">Is this correct?</p>
-            <div className="flex justify-end space-x-4">
+            <p className="mb-4">Is this correct?</p>
+            <div className="flex justify-end gap-4">
               <button
                 onClick={handleCancelSell}
                 className="px-4 py-2 bg-gray-300 text-gray-800 rounded-lg hover:bg-gray-400 transition"
@@ -877,15 +917,15 @@ const SellTyre = () => {
         </div>
       )}
 
-      <div className="bg-white p-6 rounded-lg shadow-md">
+      <div className="mt-8">
         <input
           type="text"
-          placeholder="Search sold items..."
+          placeholder="Search transactions..."
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
           className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-400 focus:outline-none mb-4"
         />
-        <div className="flex space-x-4 mb-6">
+        <div className="flex gap-4 mb-4">
           <div className="relative">
             <DatePicker
               selected={startDate}
@@ -898,7 +938,7 @@ const SellTyre = () => {
               dateFormat="yyyy-MM-dd"
               isClearable
             />
-            <CalendarIcon className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
+            <CalendarIcon className="absolute left-2 top-2.5 h-5 w-5 text-gray-400" />
           </div>
           <div className="relative">
             <DatePicker
@@ -913,7 +953,7 @@ const SellTyre = () => {
               dateFormat="yyyy-MM-dd"
               isClearable
             />
-            <CalendarIcon className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
+            <CalendarIcon className="absolute left-2 top-2.5 h-5 w-5 text-gray-400" />
           </div>
         </div>
 
@@ -935,6 +975,7 @@ const SellTyre = () => {
                     <th className="px-4 py-2 border text-left text-sm font-semibold text-gray-700">Total</th>
                     <th className="px-4 py-2 border text-left text-sm font-semibold text-gray-700">Date</th>
                     <th className="px-4 py-2 border text-left text-sm font-semibold text-gray-700">Actions</th>
+                    <th className="px-4 py-2 border text-left text-sm font-semibold text-gray-700">Comment</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -956,7 +997,7 @@ const SellTyre = () => {
                               onClick={() => {
                                 const items = transaction.items.map(t => ({
                                   ...t,
-                                  totalPrice: ((parseFloat(t.price) || 0) - (parseFloat(t.discount) || 0)) * (parseInt(t.quantity) || 0),
+                                  totalPrice: ((parseFloat(t.price) || 0) - (parseFloat(t.discount) || 0)) * (parseInt(t.quantity) || 0) - (parseFloat(t.due) || 0),
                                 }));
                                 setFormItems(items);
                                 setCustomerSearch(transaction.customerName);
@@ -982,11 +1023,12 @@ const SellTyre = () => {
                             </button>
                           </div>
                         </td>
+                        <td className="px-4 py-2 border text-gray-600">{transaction.comment}</td>
                       </tr>
                     ))
                   ) : (
                     <tr>
-                      <td colSpan="10" className="px-4 py-2 text-center text-gray-600">No transactions found.</td>
+                      <td colSpan="11" className="px-4 py-2 text-center text-gray-600">No transactions found.</td>
                     </tr>
                   )}
                 </tbody>
@@ -1023,7 +1065,7 @@ const SellTyre = () => {
                 <div className="customer-details grid gap-2 text-gray-700">
                   <p><strong>Name:</strong> {viewTransaction.customerName || 'N/A'}</p>
                   <p><strong>Address:</strong> {getCustomerDetails(viewTransaction.customerName).address}</p>
-                  <p><strong>Phone:</strong> {getCustomerDetails(viewTransaction.customerNumber).phone}</p>
+                  <p><strong>Phone:</strong> {getCustomerDetails(viewTransaction.customerName).phone}</p>
                 </div>
               </div>
               <div className="section">
@@ -1038,6 +1080,7 @@ const SellTyre = () => {
                         <th className="border border-gray-200 px-4 py-2 text-left font-semibold text-gray-700">Price</th>
                         <th className="border border-gray-200 px-4 py-2 text-left font-semibold text-gray-700">Quantity</th>
                         <th className="border border-gray-200 px-4 py-2 text-left font-semibold text-gray-700">Discount</th>
+                        <th className="border border-gray-200 px-4 py-2 text-left font-semibold text-gray-700">Due</th>
                         <th className="border border-gray-200 px-4 py-2 text-left font-semibold text-gray-700">Total</th>
                       </tr>
                     </thead>
@@ -1050,6 +1093,7 @@ const SellTyre = () => {
                           <td className="border border-gray-200 px-4 py-2 text-gray-600">Rs. {item.price.toFixed(2)}</td>
                           <td className="border border-gray-200 px-4 py-2 text-gray-600">{item.quantity}</td>
                           <td className="border border-gray-200 px-4 py-2 text-gray-600">Rs. {item.discount || 0}</td>
+                          <td className="border border-gray-200 px-4 py-2 text-gray-600">Rs. {item.due || 0}</td>
                           <td className="border border-gray-200 px-4 py-2 text-gray-600">Rs. {(item.payableAmount || item.price * item.quantity).toLocaleString()}</td>
                         </tr>
                       ))}
@@ -1060,15 +1104,16 @@ const SellTyre = () => {
               <div className="section">
                 <div className="total-section flex justify-end">
                   <div className="total-box bg-gray-50 p-4 rounded-lg w-80">
-                    <p className="font-bold">Total : {viewTransaction.totalPayable.toLocaleString()}</p>
+                    <p>Total Amount: {calculateInvoiceTotals(viewTransaction.items).totalPayable.toLocaleString()}</p>
+                    <p>Total Paid: {calculateInvoiceTotals(viewTransaction.items).totalPaid.toLocaleString()}</p>
+                    <p>Total Dues: {calculateInvoiceTotals(viewTransaction.items).totalDues.toLocaleString()}</p>
                   </div>
                 </div>
               </div>
               <div className="footer text-center mt-6 border-t border-gray-200 pt-4 text-gray-600">
                 <p className="font-semibold">Thank you for your business!</p>
-                <p>Phone: 0307-7717613 | Sher Shah Road Near Masjid Al Qadir Dera Adda, Multan, Pakistan </p>
-                <p>Terms: Payment due within 30 days. All sales are final.</p>
-                <p className="status font-semibold text-green-600">Status: Sold</p>
+                <p>Phone: 0307-7717613 | Sher Shah Road Near Masjid Al Qadir Dera Adda, Multan, Pakistan</p>
+                <p>Status: Sold</p>
               </div>
             </div>
             <div className="flex justify-end space-x-4 mt-6">

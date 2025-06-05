@@ -37,27 +37,21 @@ const BuyTyre = () => {
   const [sizes, setSizes] = useState([]);
   const itemsPerPage = 5;
 
-  // Fetch tyres, companies, and suggestions from Firestore
   useEffect(() => {
-    // Fetch purchased tyres
     const unsubTyres = onSnapshot(collection(db, "purchasedTyres"), (snapshot) => {
       let data = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
       data = filterByDateRange(data, startDate, endDate);
-      // Sort by date in descending order (latest first)
       data.sort((a, b) => {
         const dateA = a.date ? new Date(a.date).getTime() : 0;
-        const dateB = b.date ? new Date(a.date).getTime() : 0;
+        const dateB = b.date ? new Date(b.date).getTime() : 0; // Fixed sorting bug
         return dateB - dateA;
       });
       setTyres(data);
-
-      // Populate suggestions for brand, model, and size
       setBrands([...new Set(data.map((item) => item.brand))]);
       setModels([...new Set(data.map((item) => item.model))]);
       setSizes([...new Set(data.map((item) => item.size))]);
     });
 
-    // Fetch companies from users collection
     const fetchCompanies = async () => {
       const q = query(collection(db, "users"), where("userType", "==", "Company"));
       const snapshot = await getDocs(q);
@@ -73,6 +67,10 @@ const BuyTyre = () => {
     e.preventDefault();
     if (!company || !brand || !model || !size || !price || !quantity || !date) {
       toast.error("Please fill all fields");
+      return;
+    }
+    if (Number(price) <= 0) {
+      toast.error("Price must be greater than 0");
       return;
     }
     if (Number(quantity) <= 0) {
@@ -100,15 +98,35 @@ const BuyTyre = () => {
       date,
     };
     try {
+      let tyreId;
       if (editId) {
         const tyreRef = doc(db, "purchasedTyres", editId);
         await updateDoc(tyreRef, tyre);
+        tyreId = editId;
         toast.success("Tyre updated successfully!");
         setEditId(null);
       } else {
-        await addDoc(collection(db, "purchasedTyres"), tyre);
+        const docRef = await addDoc(collection(db, "purchasedTyres"), tyre);
+        tyreId = docRef.id;
         toast.success("Tyre purchased successfully!");
       }
+
+      // Add debit entry to companyLedgerEntries
+      const totalCost = Number(price) * Number(quantity);
+      const narration = `Purchase of ${quantity} ${brand} ${size || 'N/A'}`;
+      await addDoc(collection(db, "companyLedgerEntries"), {
+        companyName: company.toLowerCase(),
+        brand: brand || 'N/A',
+        size: size || 'N/A',
+        invoiceNumber: `INV${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+        date,
+        narration,
+        debit: totalCost,
+        credit: 0,
+        createdAt: new Date(),
+      });
+
+      // Reset form fields
       setCompany("");
       setBrand("");
       setModel("");
@@ -119,7 +137,7 @@ const BuyTyre = () => {
       setShop("");
       setDate("");
     } catch (err) {
-      toast.error("Error purchasing tyre.");
+      toast.error("Error processing tyre purchase.");
       console.error(err);
     }
   };
@@ -374,9 +392,7 @@ const BuyTyre = () => {
             className="bg-white rounded-xl shadow-2xl max-w-3xl w-full p-8 relative font-sans print:bg-white print:p-0 print:shadow-none"
             id="printable"
           >
-            <header className="flex justify-between items-center border-b border-gray-200 pb-4
-
- mb-6">
+            <header className="flex justify-between items-center border-b border-gray-200 pb-4 mb-6">
               <h2 className="text-3xl font-extrabold text-gray-900 flex items-center gap-2">
                 <span role="img" aria-label="Invoice">🧾</span> Purchase Invoice
               </h2>

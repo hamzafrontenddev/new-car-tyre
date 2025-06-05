@@ -63,6 +63,29 @@ const CustomerLedger = () => {
         date: doc.data().date?.toDate ? doc.data().date.toDate() : parseDateSafely(doc.data().date || Date.now())
       }));
       setSellData(sellList);
+
+      // Automatically add debit entries for new sales
+      sellList.forEach(async (item) => {
+        if (!item.invoiceNumber) return; // Skip if no invoice number
+        const existingLedgerEntry = ledgerEntries.find(entry => entry.invoiceNumber === item.invoiceNumber);
+        if (!existingLedgerEntry) {
+          try {
+            await addDoc(collection(db, 'customerLedgerEntries'), {
+              customerName: (item.customerName || 'N/A').toLowerCase(),
+              brand: item.brand || 'N/A',
+              size: item.size || 'N/A',
+              invoiceNumber: item.invoiceNumber,
+              date: parseDateSafely(item.date).toISOString().split('T')[0],
+              narration: `${item.size || 'N/A'} ${item.brand || 'N/A'} Qty_${item.quantity}_Rate_${item.price}`,
+              debit: item.price * item.quantity,
+              credit: 0,
+              createdAt: new Date(),
+            });
+          } catch (error) {
+            console.error('Error adding automatic debit entry:', error);
+          }
+        }
+      });
     });
 
     const unsubscribeCustomerDetails = onSnapshot(collection(db, 'customerDetails'), (snapshot) => {
@@ -91,7 +114,7 @@ const CustomerLedger = () => {
       unsubscribeBrandDetails();
       unsubscribeLedger();
     };
-  }, []);
+  }, [ledgerEntries]); // Add ledgerEntries as dependency to check for existing entries
 
   const customerSummary = useMemo(() => {
     const customerMap = {};
@@ -504,7 +527,7 @@ const CustomerLedger = () => {
       }
 
       await addDoc(collection(db, 'customerLedgerEntries'), {
-        customerName: customerName.toLowerCase(), // Normalize case
+        customerName: customerName.toLowerCase(),
         brand,
         size,
         invoiceNumber: `RV${Date.now()}-${Math.floor(Math.random() * 1000)}`,
@@ -514,25 +537,6 @@ const CustomerLedger = () => {
         credit,
         createdAt,
       });
-
-      sellData
-        .filter(item => (item.customerName || 'N/A') === customerName && item.invoiceNumber)
-        .forEach(async (item) => {
-          const existingLedgerEntry = ledgerEntries.find(entry => entry.invoiceNumber === item.invoiceNumber);
-          if (!existingLedgerEntry) {
-            await addDoc(collection(db, 'customerLedgerEntries'), {
-              customerName: customerName.toLowerCase(),
-              brand: item.brand,
-              size: item.size,
-              invoiceNumber: item.invoiceNumber,
-              date: parseDateSafely(item.date).toISOString().split('T')[0],
-              narration: `${item.size || 'N/A'} ${item.brand || 'N/A'} Qty_${item.quantity}_Rate_${item.price}`,
-              debit: item.price * item.quantity,
-              credit: 0,
-              createdAt: new Date(),
-            });
-          }
-        });
 
       toast.success('Customer details saved successfully');
       closeAddCustomerModal();
@@ -1044,7 +1048,7 @@ const CustomerLedger = () => {
                     endDate={ledgerFilterDates.endDate}
                     minDate={ledgerFilterDates.startDate}
                     placeholderText="End Date"
-                    className="w-full px-4 py-2 border border-gray-200 rounded-xl shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-700"
+                    className="w-full px-4 py-2 border border-gray-200 mici: 2 focus:ring-blue-500 focus:border-blue-500 text-gray-700"
                     dateFormat="dd/MM/yyyy"
                     isClearable
                   />

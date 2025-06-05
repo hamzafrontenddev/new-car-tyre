@@ -25,16 +25,11 @@ const CompanyLeaders = () => {
   const [rowsPerPage] = useState(5);
   const [companyFormData, setCompanyFormData] = useState({
     companyName: '',
-    brand: '',
-    size: '',
     totalBrands: 0,
-    totalItems: 0,
-    totalCost: '',
     totalCompanyItems: 0,
     totalCompanyCost: '',
     totalPaid: '',
     companyDue: '',
-    brandDue: '',
     paymentMethod: '',
     bankName: '',
   });
@@ -105,9 +100,9 @@ const CompanyLeaders = () => {
     });
 
     return Object.keys(companyMap).map(company => {
-      const details = companyDetails.find(detail => detail.companyName === company) || { totalPaid: 0 };
+      const companyLedger = ledgerEntries.filter(entry => entry.companyName.toLowerCase() === company.toLowerCase());
+      const totalPaid = companyLedger.reduce((sum, entry) => sum + (parseFloat(entry.credit) || 0), 0);
       const totalCost = companyMap[company].totalCost;
-      const totalPaid = parseFloat(details.totalPaid) || 0;
       const due = (totalCost - totalPaid).toFixed(2);
       return {
         company,
@@ -118,7 +113,7 @@ const CompanyLeaders = () => {
         brands: companyMap[company].brands,
       };
     });
-  }, [buyData, companyDetails]);
+  }, [buyData, ledgerEntries]);
 
   const filteredCompanies = companySummary.filter(item =>
     item.company.toLowerCase().includes(searchQuery.toLowerCase())
@@ -223,7 +218,7 @@ const CompanyLeaders = () => {
     if (!company) return { ledgerData: [], totalDebit: 0, totalCredit: 0 };
 
     const sortedEntries = ledgerEntries
-      .filter(entry => entry.companyName === companyName.toLowerCase()) // Normalize case
+      .filter(entry => entry.companyName.toLowerCase() === companyName.toLowerCase())
       .filter(entry => {
         const entryDate = new Date(entry.date);
         const { startDate, endDate } = ledgerFilterDates;
@@ -232,13 +227,13 @@ const CompanyLeaders = () => {
         }
         return true;
       })
-      .sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt)); // Oldest at top, newest at bottom
+      .sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
 
-    let balance = 0; // Initial balance starts at 0
+    let balance = 0;
     const ledgerData = sortedEntries.map((entry, index) => {
       const debit = parseFloat(entry.debit) || 0;
       const credit = parseFloat(entry.credit) || 0;
-      balance += debit - credit; // Balance accumulates from oldest to newest
+      balance += debit - credit;
 
       return {
         index: index + 1,
@@ -318,16 +313,11 @@ const CompanyLeaders = () => {
     setAddCompanyModalIsOpen(false);
     setCompanyFormData({
       companyName: '',
-      brand: '',
-      size: '',
       totalBrands: 0,
-      totalItems: 0,
-      totalCost: '',
       totalCompanyItems: 0,
       totalCompanyCost: '',
       totalPaid: '',
       companyDue: '',
-      brandDue: '',
       paymentMethod: '',
       bankName: '',
     });
@@ -348,17 +338,11 @@ const CompanyLeaders = () => {
     const updatedFormData = { ...companyFormData, [name]: value };
 
     if (name === 'companyName') {
-      updatedFormData.brand = '';
-      updatedFormData.size = '';
       updatedFormData.totalBrands = getTotalBrands(value);
-      updatedFormData.totalItems = 0;
-      updatedFormData.totalCost = '';
       updatedFormData.totalCompanyItems = 0;
       updatedFormData.totalCompanyCost = '';
       updatedFormData.totalPaid = '';
       updatedFormData.companyDue = '';
-      updatedFormData.brandDue = '';
-      updatedFormData.paymentMethod = '';
       updatedFormData.bankName = '';
       const companyMetrics = getCompanyMetrics(value);
       updatedFormData.totalCompanyItems = companyMetrics.totalItems;
@@ -366,34 +350,13 @@ const CompanyLeaders = () => {
       updatedFormData.companyDue = companyMetrics.due;
     }
 
-    if (name === 'brand') {
-      updatedFormData.size = '';
-      updatedFormData.totalItems = 0;
-      updatedFormData.totalCost = '';
-      updatedFormData.totalPaid = '';
-      updatedFormData.brandDue = '';
-    }
-
-    if (name === 'size') {
-      const metrics = getBrandSizeMetrics(updatedFormData.companyName, updatedFormData.brand, value);
-      updatedFormData.totalItems = metrics.totalItems;
-      updatedFormData.totalCost = metrics.totalCost;
-      updatedFormData.totalPaid = metrics.totalPaid;
-      updatedFormData.brandDue = metrics.due;
-    }
-
     if (name === 'paymentMethod') {
       updatedFormData.bankName = value === 'Bank' ? updatedFormData.bankName : '';
     }
 
     if (name === 'totalPaid') {
-      const metrics = getBrandSizeMetrics(updatedFormData.companyName, updatedFormData.brand, updatedFormData.size);
-      const totalCost = parseFloat(metrics.totalCost) || 0;
-      const existingTotalPaid = parseFloat(metrics.totalPaid) || 0;
-      const newPayment = parseFloat(value) || 0;
       const companyMetrics = getCompanyMetrics(updatedFormData.companyName);
-      updatedFormData.companyDue = (companyMetrics.due - newPayment).toFixed(2);
-      updatedFormData.brandDue = (totalCost - (existingTotalPaid + newPayment)).toFixed(2);
+      updatedFormData.companyDue = (companyMetrics.due - (parseFloat(value) || 0)).toFixed(2);
     }
 
     setCompanyFormData(updatedFormData);
@@ -401,10 +364,11 @@ const CompanyLeaders = () => {
 
   const handleAddCompanyDetails = async (e) => {
     e.preventDefault();
-    const { companyName, brand, size, totalPaid, paymentMethod, bankName } = companyFormData;
+    const { companyName, totalPaid, paymentMethod, bankName } = companyFormData;
 
-    if (!companyName || !brand || !size || !totalPaid || !paymentMethod) {
-      toast.error('Please fill all required fields (Company Name, Brand, Size, Total Paid, Payment Method)');
+    // Validation logic
+    if (!companyName || !totalPaid || !bankName) {
+      toast.error('Please fill required fields: Company Name, Payment Amount, and Bank Name');
       return;
     }
 
@@ -414,7 +378,6 @@ const CompanyLeaders = () => {
     }
 
     const companyData = companySummary.find(item => item.company === companyName);
-    const brandDetailExists = brandDetails.find(detail => detail.companyName === companyName && detail.brand === brand && detail.size === size);
     const companyDetailExists = companyDetails.find(detail => detail.companyName === companyName);
 
     if (!companyData) {
@@ -422,63 +385,18 @@ const CompanyLeaders = () => {
       return;
     }
 
-    const todayDate = new Date().toISOString().split('T')[0];
-    const createdAt = new Date();
-    let narration = '';
-    let debit = 0;
-    let credit = 0;
-
-    if (paymentMethod === 'Bank') {
-      narration = `ONLINE bY ${bankName}`;
-      credit = parseFloat(totalPaid) || 0;
-    } else if (paymentMethod === 'Debit Card') {
-      const latestPurchase = buyData
-        .filter(item => item.company === companyName && item.brand === brand && item.size === size)
-        .sort((a, b) => new Date(b.date) - new Date(a.date))[0];
-      if (latestPurchase) {
-        narration = `${latestPurchase.size || 'N/A'} ${latestPurchase.model || 'N/A'} ${latestPurchase.brand || 'N/A'} ${latestPurchase.quantity || 0}X${parseFloat(latestPurchase.price || 0)}`;
-      } else {
-        narration = 'Debit';
-      }
-      debit = parseFloat(totalPaid) || 0;
+    // Confirmation popup
+    const confirmSave = window.confirm('Are you sure you want to save the payment details?');
+    if (!confirmSave) {
+      return;
     }
 
-    try {
-      if (brandDetailExists) {
-        const brandDoc = doc(db, 'brandDetails', brandDetailExists.id);
-        const existingTotalPaid = parseFloat(brandDetailExists.totalPaid) || 0;
-        const newTotalPaid = existingTotalPaid + (parseFloat(totalPaid) || 0);
-        const brandTotalCost = parseFloat(companyFormData.totalCost) || 0;
-        const newDue = (brandTotalCost - newTotalPaid).toFixed(2);
-        await updateDoc(brandDoc, {
-          companyName,
-          brand,
-          size,
-          totalPaid: newTotalPaid,
-          due: parseFloat(newDue) >= 0 ? parseFloat(newDue) : 0,
-          paymentMethod,
-          bankName: paymentMethod === 'Bank' ? bankName : '',
-          date: todayDate,
-          totalItems: companyFormData.totalItems,
-          totalCost: parseFloat(companyFormData.totalCost),
-        });
-      } else {
-        const brandTotalCost = parseFloat(companyFormData.totalCost) || 0;
-        const newDue = (brandTotalCost - parseFloat(totalPaid)).toFixed(2);
-        await addDoc(collection(db, 'brandDetails'), {
-          companyName,
-          brand,
-          size,
-          totalPaid: parseFloat(totalPaid),
-          due: parseFloat(newDue) >= 0 ? parseFloat(newDue) : 0,
-          paymentMethod,
-          bankName: paymentMethod === 'Bank' ? bankName : '',
-          date: todayDate,
-          totalItems: companyFormData.totalItems,
-          totalCost: parseFloat(companyFormData.totalCost),
-        });
-      }
+    const todayDate = new Date().toISOString().split('T')[0];
+    const createdAt = new Date();
+    const narration = `ONLINE bY ${bankName}`;
+    const credit = parseFloat(totalPaid) || 0;
 
+    try {
       let companyTotalPaid = 0;
       brandDetails
         .filter(detail => detail.companyName === companyName)
@@ -509,13 +427,13 @@ const CompanyLeaders = () => {
       }
 
       await addDoc(collection(db, 'companyLedgerEntries'), {
-        companyName: companyName.toLowerCase(), // Normalize case
-        brand,
-        size,
+        companyName: companyName.toLowerCase(),
+        brand: 'N/A',
+        size: 'N/A',
         invoiceNumber: `RV${Date.now()}-${Math.floor(Math.random() * 1000)}`,
         date: todayDate,
         narration,
-        debit,
+        debit: 0,
         credit,
         createdAt,
       });
@@ -579,9 +497,9 @@ const CompanyLeaders = () => {
             <table>
               <thead>
                 <tr>
+                  <th>Sr.No</th>
                   <th>Date</th>
                   <th>Description</th>
-                  <th>Invoice #</th>
                   <th>Debit (PKR)</th>
                   <th>Credit (PKR)</th>
                   <th>Balance (PKR)</th>
@@ -590,12 +508,12 @@ const CompanyLeaders = () => {
               <tbody>
                 ${ledgerData.map(entry => `
                   <tr>
+                    <td>${entry.index}</td>
                     <td>${entry.date}</td>
                     <td class="text-left">${entry.description}</td>
-                    <td>${entry.invoice}</td>
                     <td>${entry.debit > 0 ? `PKR ${entry.debit.toLocaleString()}` : '-'}</td>
                     <td>${entry.credit > 0 ? `PKR ${entry.credit.toLocaleString()}` : '-'}</td>
-                    <td class="${entry.balance >= 0 ? 'balance-cr' : 'balance-dr'}">${entry.balanceDisplay.toLocaleString()} ${entry.balanceType}</td>
+                    <td class="${entry.balance >= 0 ? 'balance-cr' : 'balance-dr'}">${entry.balanceDisplay.toLocaleString()}</td>
                   </tr>
                 `).join('')}
                 <tr class="total-row">
@@ -624,7 +542,7 @@ const CompanyLeaders = () => {
 
   return (
     <div className="p-6 max-w-7xl mx-auto bg-gradient-to-b from-gray-50 to-gray-100 min-h-screen">
-      <h1 className="text-4xl font-semibold mb-8 text-gray-900 bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">
+      <h1 className="text-4xl font-semibold mb-8 text-gray-900 bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text ">
         Company Ledger Dashboard
       </h1>
       <div className="flex flex-col md:flex-row justify-between gap-4 mb-8">
@@ -639,7 +557,7 @@ const CompanyLeaders = () => {
           onClick={openAddCompanyModal}
           className="p-4 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-lg shadow hover:shadow-lg hover:from-blue-500 hover:to-indigo-500 transition duration-300"
         >
-          Add Brand Payment Details
+          Add Payment Details
         </button>
       </div>
 
@@ -675,7 +593,7 @@ const CompanyLeaders = () => {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
               </svg>
             </button>
-            <h2 className="text-3xl font-bold mb-6 text-gray-800 bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">
+            <h2 className="text-3xl font-bold mb-6 text-gray-800 bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text">
               {selectedCompany.company} Details
             </h2>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
@@ -728,7 +646,7 @@ const CompanyLeaders = () => {
                     selectsStart
                     startDate={brandFilterDates.startDate}
                     endDate={brandFilterDates.endDate}
-                    placeholderText="Start Date"
+                    placeholder that="Start Date"
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-700"
                     dateFormat="dd/MM/yyyy"
                     isClearable
@@ -760,8 +678,6 @@ const CompanyLeaders = () => {
                     <th className="py-3 px-6 border border-gray-400">Size</th>
                     <th className="py-3 px-6 border border-gray-400">Total Items</th>
                     <th className="py-3 px-6 border border-gray-400">Total Cost</th>
-                    <th className="py-3 px-6 border border-gray-400">Total Paid</th>
-                    <th className="py-3 px-6 border border-gray-400">Due</th>
                     <th className="py-3 px-6 border border-gray-400">Purchase Date</th>
                   </tr>
                 </thead>
@@ -772,8 +688,6 @@ const CompanyLeaders = () => {
                       <td className="py-3 px-6 border border-gray-400">{item.sizes}</td>
                       <td className="py-3 px-6 border border-gray-400">{item.totalItems}</td>
                       <td className="py-3 px-6 border border-gray-400">Rs. {item.totalCost.toLocaleString()}</td>
-                      <td className="py-3 px-6 border border-gray-400">Rs. {item.totalPaid.toLocaleString()}</td>
-                      <td className="py-3 px-6 border border-gray-400">Rs. {item.due.toLocaleString()}</td>
                       <td className="py-3 px-6 border border-gray-400">{item.date}</td>
                     </tr>
                   ))}
@@ -810,8 +724,8 @@ const CompanyLeaders = () => {
         overlayClassName="fixed inset-0 bg-gray-900 bg-opacity-50 flex justify-center items-center"
       >
         <div>
-          <h2 className="text-2xl font-semibold mb-6 text-gray-800 bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">
-            Add Brand Payment Details
+          <h2 className="text-2xl font-semibold mb-6 text-gray-800 bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text">
+            Add Payment Details
           </h2>
           <form onSubmit={handleAddCompanyDetails} className="flex flex-wrap gap-4">
             <div className="w-full md:w-[48%]">
@@ -822,46 +736,12 @@ const CompanyLeaders = () => {
                 value={companyFormData.companyName}
                 onChange={handleCompanyFormChange}
                 list="companyNames"
-                className="w-full p-4 px-2 border rounded-lg border-gray-200 shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className="w-full p-2 px-2 border rounded-lg border-gray-200 shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                 required
               />
               <datalist id="companyNames">
                 {companySummary.map((item, index) => (
                   <option key={index} value={item.company} />
-                ))}
-              </datalist>
-            </div>
-            <div className="w-full md:w-[48%]">
-              <label className="block text-sm font-medium mb-1 text-gray-700">Brand</label>
-              <input
-                type="text"
-                name="brand"
-                value={companyFormData.brand}
-                onChange={handleCompanyFormChange}
-                list="brandNames"
-                className="w-full px-4 p-2 border rounded-lg border-gray-200 shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                required
-              />
-              <datalist id="brandNames">
-                {getBrandsForCompany(companyFormData.companyName).map((brand, index) => (
-                  <option key={index} value={brand} />
-                ))}
-              </datalist>
-            </div>
-            <div className="w-full md:w-[48%]">
-              <label className="block text-sm font-medium mb-1 text-gray-700">Size</label>
-              <input
-                type="text"
-                name="size"
-                value={companyFormData.size}
-                onChange={handleCompanyFormChange}
-                list="sizeNames"
-                className="w-full px-4 p-2 border rounded-lg border-gray-200 shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                required
-              />
-              <datalist id="sizeNames">
-                {getSizesForBrand(companyFormData.companyName, companyFormData.brand).map((size, index) => (
-                  <option key={index} value={size} />
                 ))}
               </datalist>
             </div>
@@ -896,26 +776,6 @@ const CompanyLeaders = () => {
               />
             </div>
             <div className="w-full md:w-[48%]">
-              <label className="block text-sm font-medium mb-1 text-gray-700">Total Items (Brand)</label>
-              <input
-                type="number"
-                name="totalItems"
-                value={companyFormData.totalItems}
-                className="w-full px-4 p-2 border rounded-lg border-gray-200 bg-gray-100"
-                readOnly
-              />
-            </div>
-            <div className="w-full md:w-[48%]">
-              <label className="block text-sm font-medium mb-1 text-gray-700">Total Cost (Brand)</label>
-              <input
-                type="number"
-                name="totalCost"
-                value={companyFormData.totalCost}
-                className="w-full px-4 p-2 border rounded-lg border-gray-200 bg-gray-100"
-                readOnly
-              />
-            </div>
-            <div className="w-full md:w-[48%]">
               <label className="block text-sm font-medium mb-1 text-gray-700">Payment Amount</label>
               <input
                 type="number"
@@ -937,16 +797,6 @@ const CompanyLeaders = () => {
               />
             </div>
             <div className="w-full md:w-[48%]">
-              <label className="block text-sm font-medium mb-1 text-gray-700">Due (Brand)</label>
-              <input
-                type="number"
-                name="brandDue"
-                value={companyFormData.brandDue}
-                className="w-full px-4 p-2 border rounded-lg border-gray-200 bg-gray-100"
-                readOnly
-              />
-            </div>
-            <div className="w-full md:w-[48%]">
               <label className="block text-sm font-medium mb-1 text-gray-700">Payment Method</label>
               <select
                 name="paymentMethod"
@@ -956,23 +806,20 @@ const CompanyLeaders = () => {
                 required
               >
                 <option value="">Select Payment Method</option>
-                <option value="Debit Card">Debit</option>
                 <option value="Bank">Bank</option>
               </select>
             </div>
-            {companyFormData.paymentMethod === 'Bank' && (
-              <div className="w-full md:w-[48%]">
-                <label className="block text-sm font-medium mb-1 text-gray-700">Bank Name</label>
-                <input
-                  type="text"
-                  name="bankName"
-                  value={companyFormData.bankName}
-                  onChange={handleCompanyFormChange}
-                  className="w-full px-4 p-2 border rounded-lg border-gray-200 shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  required
-                />
-              </div>
-            )}
+            <div className="w-full md:w-[48%]">
+              <label className="block text-sm font-medium mb-1 text-gray-700">Bank Name</label>
+              <input
+                type="text"
+                name="bankName"
+                value={companyFormData.bankName}
+                onChange={handleCompanyFormChange}
+                className="w-full px-4 p-2 border rounded-lg border-gray-200 shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                required
+              />
+            </div>
             <div className="w-full flex justify-end gap-4 mt-6">
               <button
                 type="button"
@@ -1064,7 +911,7 @@ const CompanyLeaders = () => {
               <table className="min-w-full border-collapse text-sm bg-white rounded-xl shadow-sm">
                 <thead>
                   <tr className="bg-gray-200">
-                    <th className="py-3 px-6 font-semibold border border-black text-left">Invoice #</th>
+                    <th className="py-3 px-6 font-semibold border border-black text-left">Sr.No</th>
                     <th className="py-3 px-6 font-semibold border border-black text-left">Date</th>
                     <th className="py-3 px-6 font-semibold border border-black text-left">Description</th>
                     <th className="py-3 px-6 font-semibold border border-black text-right">Debit (PKR)</th>
@@ -1075,16 +922,16 @@ const CompanyLeaders = () => {
                 <tbody>
                   {getLedgerForCompany(selectedCompany.company).ledgerData.map((entry, index) => (
                     <tr key={index} className={index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
-                      <td className="py-3 px-6 border border-black">{entry.invoice}</td>
+                      <td className="py-3 px-6 border border-black">{entry.index}</td>
                       <td className="py-3 px-6 border border-black">{entry.date}</td>
                       <td className="py-3 px-6 border border-black text-left">{entry.description}</td>
                       <td className="py-3 px-6 border border-black text-right">{entry.debit > 0 ? `PKR ${entry.debit.toLocaleString()}` : '-'}</td>
                       <td className="py-3 px-6 border border-black text-right">{entry.credit > 0 ? `PKR ${entry.credit.toLocaleString()}` : '-'}</td>
                       <td className="py-3 px-6 border border-black text-right">
                         {entry.balance >= 0 ? (
-                          <span className="text-red-600 font-semibold">PKR {entry.balanceDisplay.toLocaleString()} Cr</span>
+                          <span className="text-red-600 font-semibold">PKR {entry.balanceDisplay.toLocaleString()}</span>
                         ) : (
-                          <span className="text-green-600 font-semibold">PKR {entry.balanceDisplay.toLocaleString()} Dr</span>
+                          <span className="text-green-600 font-semibold">PKR {entry.balanceDisplay.toLocaleString()}</span>
                         )}
                       </td>
                     </tr>
