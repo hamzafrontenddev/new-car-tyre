@@ -96,7 +96,7 @@ const CompanyLeaders = () => {
       companyMap[item.company].brands[item.brand].totalItems += item.quantity;
       companyMap[item.company].brands[item.brand].totalCost += item.price * item.quantity;
       if (item.size) companyMap[item.company].brands[item.brand].sizes.add(item.size);
-      if (item.date) companyMap[item.company].brands[item.brand].dates.add(item.date.toISOString().split('T')[0]);
+      if (item.date) companyMap[item.company].brands[item.brand].dates.add(itemDate.toISOString().split('T')[0]);
     });
 
     return Object.keys(companyMap).map(company => {
@@ -235,10 +235,26 @@ const CompanyLeaders = () => {
       const credit = parseFloat(entry.credit) || 0;
       balance += debit - credit;
 
+      let description = entry.narration || 'N/A';
+      // Handle older formats: "Purchase of" and without brand
+      if (description.startsWith('Purchase of') && entry.invoiceNumber) {
+        const purchase = buyData.find(p => p.id === entry.invoiceNumber.split('-')[0].replace('INV', ''));
+        if (purchase) {
+          description = `${purchase.brand || 'N/A'}_${purchase.size || 'N/A'}_Qty_${purchase.quantity}_Rate_${purchase.price}`;
+        }
+      } else if (!description.includes('Payment via') && !description.includes('_Qty_')) {
+        // Handle entries with the previous format: size_Qty_quantity_Rate_price
+        const purchase = buyData.find(p => p.size === description.split('_Qty_')[0] && p.quantity == description.split('_Qty_')[1].split('_Rate_')[0] && p.price == description.split('_Rate_')[1]);
+        if (purchase) {
+          description = `${purchase.brand || 'N/A'}_${purchase.size || 'N/A'}_Qty_${purchase.quantity}_Rate_${purchase.price}`;
+        }
+      }
+      // Payment entries (credit > 0) already have narration as "Payment via ${bankName}"
+
       return {
         index: index + 1,
         date: new Date(entry.date).toISOString().split('T')[0],
-        description: entry.narration || 'N/A',
+        description,
         invoice: entry.invoiceNumber || '-',
         debit,
         credit,
@@ -393,7 +409,7 @@ const CompanyLeaders = () => {
 
     const todayDate = new Date().toISOString().split('T')[0];
     const createdAt = new Date();
-    const narration = `ONLINE bY ${bankName}`;
+    const narration = `Payment via ${bankName}`;
     const credit = parseFloat(totalPaid) || 0;
 
     try {
@@ -500,20 +516,20 @@ const CompanyLeaders = () => {
                   <th>Sr.No</th>
                   <th>Date</th>
                   <th>Description</th>
-                  <th>Debit (PKR)</th>
-                  <th>Credit (PKR)</th>
-                  <th>Balance (PKR)</th>
+                  <th>Debit.Rs</th>
+                  <th>Credit.Rs</th>
+                  <th>Balance</th>
                 </tr>
               </thead>
               <tbody>
                 ${ledgerData.map(entry => `
                   <tr>
-                    <td>${entry.index}</td>
-                    <td>${entry.date}</td>
+                    <td class="text-center">${entry.index}</td>
+                    <td class="text-center">${entry.date}</td>
                     <td class="text-left">${entry.description}</td>
-                    <td>${entry.debit > 0 ? `PKR ${entry.debit.toLocaleString()}` : '-'}</td>
-                    <td>${entry.credit > 0 ? `PKR ${entry.credit.toLocaleString()}` : '-'}</td>
-                    <td class="${entry.balance >= 0 ? 'balance-cr' : 'balance-dr'}">${entry.balanceDisplay.toLocaleString()}</td>
+                    <td class="text-center">${entry.debit > 0 ? ` ${entry.debit.toLocaleString()}` : '0'}</td>
+                    <td class="text-center">${entry.credit > 0 ? ` ${entry.credit.toLocaleString()}` : '0'}</td>
+                    <td class="text-center" class="${entry.balance >= 0 ? 'balance-cr' : 'balance-dr'}">${entry.balanceDisplay.toLocaleString()}</td>
                   </tr>
                 `).join('')}
                 <tr class="total-row">
@@ -542,8 +558,8 @@ const CompanyLeaders = () => {
 
   return (
     <div className="p-6 max-w-7xl mx-auto bg-gradient-to-b from-gray-50 to-gray-100 min-h-screen">
-      <h1 className="text-4xl font-semibold mb-8 text-gray-900 bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text ">
-        Company Ledger Dashboard
+      <h1 className="text-4xl font-semibold mb-8 text-gray-900 bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text">
+        Party Ledger Dashboard
       </h1>
       <div className="flex flex-col md:flex-row justify-between gap-4 mb-8">
         <input
@@ -598,7 +614,7 @@ const CompanyLeaders = () => {
             </h2>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
               <div className="bg-gray-50 p-4 rounded-xl shadow-sm hover:shadow-md transition duration-200">
-                <p className="text-gray-600 font-medium">Company Name</p>
+                <p className="text-gray-600 font-medium">Party Name</p>
                 <p className="text-lg font-semibold text-gray-800">{selectedCompany.company}</p>
               </div>
               <div className="bg-gray-50 p-4 rounded-xl shadow-sm hover:shadow-md transition duration-200">
@@ -646,7 +662,7 @@ const CompanyLeaders = () => {
                     selectsStart
                     startDate={brandFilterDates.startDate}
                     endDate={brandFilterDates.endDate}
-                    placeholder that="Start Date"
+                    placeholderText="Start Date"
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-700"
                     dateFormat="dd/MM/yyyy"
                     isClearable
@@ -719,6 +735,7 @@ const CompanyLeaders = () => {
 
       <Modal
         isOpen={addCompanyModalIsOpen}
+        Ascendancy
         onRequestClose={closeAddCompanyModal}
         className="bg-white p-6 rounded-lg shadow-xl max-w-lg mx-auto w-[90%] max-h-[80vh] overflow-y-auto mt-5"
         overlayClassName="fixed inset-0 bg-gray-900 bg-opacity-50 flex justify-center items-center"
@@ -729,7 +746,7 @@ const CompanyLeaders = () => {
           </h2>
           <form onSubmit={handleAddCompanyDetails} className="flex flex-wrap gap-4">
             <div className="w-full md:w-[48%]">
-              <label className="block text-sm font-medium mb-1 text-gray-700">Company Name</label>
+              <label className="block text-sm font-medium mb-1 text-gray-700">Party Name</label>
               <input
                 type="text"
                 name="companyName"
@@ -787,7 +804,7 @@ const CompanyLeaders = () => {
               />
             </div>
             <div className="w-full md:w-[48%]">
-              <label className="block text-sm font-medium mb-1 text-gray-700">Due (Company)</label>
+              <label className="block text-sm font-medium mb-1 text-gray-700">Due (Party)</label>
               <input
                 type="number"
                 name="companyDue"
@@ -914,9 +931,9 @@ const CompanyLeaders = () => {
                     <th className="py-3 px-6 font-semibold border border-black text-left">Sr.No</th>
                     <th className="py-3 px-6 font-semibold border border-black text-left">Date</th>
                     <th className="py-3 px-6 font-semibold border border-black text-left">Description</th>
-                    <th className="py-3 px-6 font-semibold border border-black text-right">Debit (PKR)</th>
-                    <th className="py-3 px-6 font-semibold border border-black text-right">Credit (PKR)</th>
-                    <th className="py-3 px-6 font-semibold border border-black text-right">Balance (PKR)</th>
+                    <th className="py-3 px-6 font-semibold border border-black text-right">Debit.Rs</th>
+                    <th className="py-3 px-6 font-semibold border border-black text-right">Credit.Rs</th>
+                    <th className="py-3 px-6 font-semibold border border-black text-right">Balance</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -925,13 +942,13 @@ const CompanyLeaders = () => {
                       <td className="py-3 px-6 border border-black">{entry.index}</td>
                       <td className="py-3 px-6 border border-black">{entry.date}</td>
                       <td className="py-3 px-6 border border-black text-left">{entry.description}</td>
-                      <td className="py-3 px-6 border border-black text-right">{entry.debit > 0 ? `PKR ${entry.debit.toLocaleString()}` : '-'}</td>
-                      <td className="py-3 px-6 border border-black text-right">{entry.credit > 0 ? `PKR ${entry.credit.toLocaleString()}` : '-'}</td>
+                      <td className="py-3 px-6 border border-black text-right">{entry.debit > 0 ? ` ${entry.debit.toLocaleString()}` : '0'}</td>
+                      <td className="py-3 px-6 border border-black text-right">{entry.credit > 0 ? ` ${entry.credit.toLocaleString()}` : '0'}</td>
                       <td className="py-3 px-6 border border-black text-right">
                         {entry.balance >= 0 ? (
-                          <span className="text-red-600 font-semibold">PKR {entry.balanceDisplay.toLocaleString()}</span>
+                          <span className="text-red-600 font-semibold">{entry.balanceDisplay.toLocaleString()}</span>
                         ) : (
-                          <span className="text-green-600 font-semibold">PKR {entry.balanceDisplay.toLocaleString()}</span>
+                          <span className="text-green-600 font-semibold">{entry.balanceDisplay.toLocaleString()}</span>
                         )}
                       </td>
                     </tr>

@@ -25,75 +25,96 @@ const PendingDues = () => {
 
   useEffect(() => {
     let usersMap = {};
+    let customerDetailsMap = {};
     let unsubscribeUsers, unsubscribeCustomers, unsubscribeSales;
 
-    // Fetch users for phone numbers
     unsubscribeUsers = onSnapshot(collection(db, 'users'), (snapshot) => {
       usersMap = snapshot.docs.reduce((map, doc) => {
         const data = doc.data();
         if (data.userType === 'Customer') {
-          map[data.name] = data.mobile;
+          map[data.name.toLowerCase()] = data.mobile || 'N/A';
         }
         return map;
       }, {});
 
-      // Fetch customerDetails with due > 0
       unsubscribeCustomers = onSnapshot(collection(db, 'customerDetails'), (snapshot) => {
-        const customerDetailsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))
-          .filter(item => parseFloat(item.due || 0) > 0);
+        customerDetailsMap = snapshot.docs.reduce((map, doc) => {
+          const data = doc.data();
+          map[data.customerName.toLowerCase()] = {
+            id: doc.id,
+            totalPaid: parseFloat(data.totalPaid) || 0,
+            due: parseFloat(data.due) || 0,
+          };
+          return map;
+        }, {});
 
-        // Fetch sales data to calculate dues for customers not yet in customerDetails
         unsubscribeSales = onSnapshot(collection(db, 'soldTyres'), (salesSnapshot) => {
-          // Aggregate sales by customer
           const salesSummary = salesSnapshot.docs.reduce((acc, doc) => {
             const data = doc.data();
-            const customerName = data.customerName || 'N/A';
+            const customerName = (data.customerName || 'N/A').toLowerCase();
             const totalCost = (parseFloat(data.price) || 0) * (parseInt(data.quantity) || 0);
+            const saleKey = `${doc.id}-${customerName}-${data.date || ''}`;
+
             if (!acc[customerName]) {
               acc[customerName] = {
                 totalCost: 0,
                 date: data.date,
                 earliestDate: data.date ? new Date(data.date) : new Date(),
+                sales: new Set(),
               };
             }
-            acc[customerName].totalCost += totalCost;
-            if (data.date && new Date(data.date) < acc[customerName].earliestDate) {
-              acc[customerName].earliestDate = new Date(data.date);
-              acc[customerName].date = data.date;
+
+            if (!acc[customerName].sales.has(saleKey)) {
+              acc[customerName].sales.add(saleKey);
+              acc[customerName].totalCost += totalCost;
+              if (data.date && new Date(data.date) < acc[customerName].earliestDate) {
+                acc[customerName].earliestDate = new Date(data.date);
+                acc[customerName].date = data.date;
+              }
             }
+
             return acc;
           }, {});
 
-          // Combine customerDetails with sales data
           const combinedData = Object.keys(salesSummary).map(customerName => {
-            const customerDetail = customerDetailsData.find(detail => detail.customerName === customerName) || {};
+            const customerDetail = customerDetailsMap[customerName] || { totalPaid: 0, due: 0 };
             const totalCost = salesSummary[customerName].totalCost || 0;
-            const totalPaid = parseFloat(customerDetail.totalPaid) || 0;
-            const due = totalCost - totalPaid;
+            const totalPaid = customerDetail.totalPaid; // Directly fetch from customerDetails
+            const due = Math.max(0, totalCost - totalPaid); // Accurate due calculation
+
+            if (due <= 0) return null; // Exclude if no pending dues
+
             return {
               id: customerDetail.id || customerName,
-              customerName,
+              customerName: customerName.charAt(0).toUpperCase() + customerName.slice(1),
               totalCost: totalCost.toFixed(2),
               totalPaid: totalPaid.toFixed(2),
               due: due.toFixed(2),
               date: salesSummary[customerName].date || new Date().toISOString().split('T')[0],
               phone: usersMap[customerName] || 'N/A',
             };
-          }).filter(item => parseFloat(item.due) > 0);
+          }).filter(item => item !== null);
 
-          // Apply date range filter
           const filteredData = filterByDateRange(combinedData, startDate, endDate);
           setPendingCustomers(filteredData);
+        }, (error) => {
+          console.error("Error fetching sales data:", error);
+          toast.error("Failed to load sales data: " + error.message);
         });
+      }, (error) => {
+        console.error("Error fetching customer details:", error);
+        toast.error("Failed to load customer details: " + error.message);
       });
+    }, (error) => {
+      console.error("Error fetching users:", error);
+      toast.error("Failed to load users: " + error.message);
     });
 
     return () => {
-  if (typeof unsubscribeUsers === 'function') unsubscribeUsers();
-  if (typeof unsubscribeCustomers === 'function') unsubscribeCustomers();
-  if (typeof unsubscribeSales === 'function') unsubscribeSales();
-};
-
+      if (unsubscribeUsers) unsubscribeUsers();
+      if (unsubscribeCustomers) unsubscribeCustomers();
+      if (unsubscribeSales) unsubscribeSales();
+    };
   }, [startDate, endDate]);
 
   const filteredCustomers = pendingCustomers.filter((customer) =>
@@ -121,7 +142,6 @@ const PendingDues = () => {
         Customer Pending Dues
       </h2>
 
-      {/* Search and Date Filter */}
       <div className="flex flex-col sm:flex-row justify-between items-center gap-4 mb-6">
         <input
           type="text"
@@ -166,7 +186,6 @@ const PendingDues = () => {
         </div>
       </div>
 
-      {/* Table */}
       <div className="overflow-x-auto">
         <table className="min-w-full border-collapse text-sm text-left bg-white rounded-xl shadow-sm">
           <thead>
@@ -208,7 +227,6 @@ const PendingDues = () => {
         </table>
       </div>
 
-      {/* Pagination */}
       <div className="flex justify-center gap-2 mt-4">
         {Array.from({ length: totalPages }, (_, i) => i + 1).map(number => (
           <button

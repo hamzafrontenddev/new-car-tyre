@@ -155,7 +155,7 @@ const CompanyPendingDues = () => {
   return (
     <div className="max-w-8xl mx-auto p-6 bg-gradient-to-b from-gray-50 to-gray-100 min-h-screen">
       <h2 className="text-3xl font-bold mb-6 bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">
-        Company Pending Dues
+        Party Pending Dues
       </h2>
 
       {/* Search and Date Filter */}
@@ -208,7 +208,7 @@ const CompanyPendingDues = () => {
         <table className="min-w-full border-collapse text-sm text-left bg-white rounded-xl shadow-sm">
           <thead>
             <tr className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white">
-              <th className="py-3 px-6 font-semibold">Company Name</th>
+              <th className="py-3 px-6 font-semibold">Party Name</th>
               <th className="py-3 px-6 font-semibold">Phone Number</th>
               <th className="py-3 px-6 font-semibold">Total Cost</th>
               <th className="py-3 px-6 font-semibold">Total Paid</th>

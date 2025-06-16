@@ -43,7 +43,7 @@ const BuyTyre = () => {
       data = filterByDateRange(data, startDate, endDate);
       data.sort((a, b) => {
         const dateA = a.date ? new Date(a.date).getTime() : 0;
-        const dateB = b.date ? new Date(b.date).getTime() : 0; // Fixed sorting bug
+        const dateB = b.date ? new Date(b.date).getTime() : 0;
         return dateB - dateA;
       });
       setTyres(data);
@@ -111,9 +111,9 @@ const BuyTyre = () => {
         toast.success("Tyre purchased successfully!");
       }
 
-      // Add debit entry to companyLedgerEntries
+      // Add debit entry to companyLedgerEntries with new narration format including brand
       const totalCost = Number(price) * Number(quantity);
-      const narration = `Purchase of ${quantity} ${brand} ${size || 'N/A'}`;
+      const narration = `${size || 'N/A'}_${brand || 'N/A'}_Qty_${quantity}_Rate_${price}`;
       await addDoc(collection(db, "companyLedgerEntries"), {
         companyName: company.toLowerCase(),
         brand: brand || 'N/A',

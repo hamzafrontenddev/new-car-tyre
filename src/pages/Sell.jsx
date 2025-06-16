@@ -18,7 +18,7 @@ import { v4 as uuidv4 } from "uuid";
 
 const filterByDateRange = (data, start, end) => {
   if (!start || !end) return data;
-  return data.filter(item => {
+  return data.filter((item) => {
     const itemDate = new Date(item.date);
     return itemDate >= start && itemDate <= end;
   });
@@ -42,6 +42,7 @@ const SellTyre = () => {
   };
 
   const [formItems, setFormItems] = useState([initialItemState]);
+  const [transactionBank, setTransactionBank] = useState("");
   const [transactionId, setTransactionId] = useState(null);
   const printRef = useRef();
   const [sellTyres, setSellTyres] = useState([]);
@@ -52,8 +53,8 @@ const SellTyre = () => {
   const [availableCompanies, setAvailableCompanies] = useState([]);
   const [availableBrands, setAvailableBrands] = useState([]);
   const [availableModels, setAvailableModels] = useState([]);
-  const [viewTransaction, setViewTransaction] = useState(null);
   const [availableSizes, setAvailableSizes] = useState([]);
+  const [viewTransaction, setViewTransaction] = useState(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [startDate, setStartDate] = useState(null);
   const [endDate, setEndDate] = useState(null);
@@ -63,7 +64,7 @@ const SellTyre = () => {
   const [isCustomerDropdownOpen, setIsCustomerDropdownOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const customerDropdownRef = useRef(null);
-  const itemsPerPage = 5;
+  const itemsPerPage = 10;
 
   useEffect(() => {
     const handleClickOutside = (event) => {
@@ -87,28 +88,12 @@ const SellTyre = () => {
         <html>
           <head>
             <title>Print Invoice</title>
+            <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
             <style>
-              body { font-family: Arial, sans-serif; padding: 20px; }
-              .invoice-container { max-width: 800px; margin: auto; }
-              .header { text-align: center; margin-bottom: 24px; border-bottom: 2px solid #2563eb; padding-bottom: 16px; }
-              .header h1 { font-size: 1.875rem; font-weight: 700; color: #2563eb; }
-              .invoice-info { display: flex; justify-content: space-between; margin-top: 8px; color: #4b5563; }
-              .section { margin-bottom: 24px; }
-              .section-title { font-size: 1.25rem; font-weight: 600; color: #2563eb; margin-bottom: 12px; }
-              .customer-details { display: grid; gap: 8px; color: #374151; }
-              .customer-details p { margin: 0; }
-              table { width: 100%; border-collapse: collapse; }
-              th, td { border: 1px solid #e5e7eb; padding: 8px; text-align: left; }
-              th { background-color: #f9fafb; font-weight: 600; color: #374151; }
-              tbody tr:hover { background-color: #f9fafb; }
-              .total-section { display: flex; justify-content: flex-end; }
-              .total-box { background-color: #f9fafb; padding: 16px; border-radius: 8px; width: 20rem; }
-              .total-box p { font-weight: 700; margin: 4px 0; }
-              .footer { text-align: center; margin-top: 24px; padding-top: 16px; border-top: 1px solid #e5e7eb; color: #4b5563; }
-              .footer p { margin: 4px 0; }
-              .status { font-weight: 600; color: #16a34a; }
               @media print {
-                .no-print { display: none; }
+                .print\\:hidden { display: none; }
+                body { margin: 0; padding: 20px; }
+                .invoice-container { max-width: 800px; margin: auto; }
               }
             </style>
           </head>
@@ -156,13 +141,13 @@ const SellTyre = () => {
 
     const fetchItemTyres = async () => {
       try {
-        const snapshot = await getDocs(collection(db, "addItemTyres"));
+        const snapshot = await getDocs(collection(db, "purchasedTyres"));
         const data = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
         setItemTyres(data);
         setAvailableCompanies([...new Set(data.map((t) => t.company?.toLowerCase()))]);
       } catch (error) {
-        console.error("Error fetching item tyres:", error);
-        toast.error("Failed to load item tyres");
+        console.error("Error fetching purchased tyres:", error);
+        toast.error("Failed to load purchased tyres");
       }
     };
 
@@ -194,6 +179,7 @@ const SellTyre = () => {
         totalPrice: ((parseFloat(item.price) || 0) - (parseFloat(item.discount) || 0)) * (parseInt(item.quantity) || 0) - (parseFloat(item.due) || 0),
       })));
       setCustomerSearch(editingTyres[0]?.customerName || "");
+      setTransactionBank(editingTyres[0]?.bank || "");
       editingTyres.forEach((tyre, index) => {
         handleCompanyChange({ target: { value: tyre.company || "" } }, index);
         setFormItems(prev => {
@@ -274,7 +260,7 @@ const SellTyre = () => {
       .map((t) => t.brand);
 
     if (brands.length === 0 && company) {
-      toast.error("❌ This company is not available in AddItem");
+      toast.error("❌ This company is not available in purchased tyres");
       setAvailableBrands([]);
       setAvailableModels([]);
       setAvailableSizes([]);
@@ -417,10 +403,9 @@ const SellTyre = () => {
           size,
           price: match.price || "",
           due: newItems[index].due || "",
-          comment: newItems[index].comment || "",
+          comment: "",
           totalPrice: ((parseFloat(match.price) || 0) - (parseFloat(newItems[index].discount) || 0)) * (parseInt(newItems[index].quantity) || 0) - (parseFloat(newItems[index].due) || 0),
         };
-        return newItems;
       });
 
       const fetchShopQuantity = async () => {
@@ -457,7 +442,7 @@ const SellTyre = () => {
           size,
           shopQuantity: "",
           due: newItems[index].due || "",
-          comment: newItems[index].comment || "",
+          comment: "",
           totalPrice: 0,
         };
         return newItems;
@@ -481,126 +466,188 @@ const SellTyre = () => {
   };
 
   const confirmSellTyre = async () => {
-    for (const [index, item] of formItems.entries()) {
-      if (!item.company || !item.brand || !item.model || !item.size || !item.price || !item.quantity || !item.customerName) {
-        toast.error(`Please fill all fields for item ${index + 1}`);
-        return;
-      }
-
-      const enteredQty = parseInt(item.quantity);
-      if (enteredQty <= 0) {
-        toast.error(`❌ Quantity must be greater than 0 for item ${index + 1}`);
-        return;
-      }
-
-      const shopQty = parseInt(item.shopQuantity) || 0;
-      if (enteredQty > shopQty) {
-        toast.error(`❌ Only ${shopQty} tyres available in shop for item ${index + 1}. Cannot sell more than that.`);
-        return;
-      }
-
-      const matchedItems = itemTyres.filter(
-        (t) =>
-          t.company?.toLowerCase() === item.company.toLowerCase() &&
-          t.brand?.toLowerCase() === item.brand.toLowerCase() &&
-          t.model?.toLowerCase() === item.model.toLowerCase() &&
-          t.size === item.size
-      );
-
-      const totalPurchasedQty = matchedItems.reduce((acc, curr) => acc + parseInt(curr.quantity || 0), 0);
-
-      const matchedSold = sellTyres.filter(
-        (t) =>
-          t.company?.toLowerCase() === item.company.toLowerCase() &&
-          t.brand?.toLowerCase() === item.brand.toLowerCase() &&
-          t.model?.toLowerCase() === item.model.toLowerCase() &&
-          t.size === item.size
-      );
-
-      const totalSoldQty = matchedSold.reduce((acc, curr) => acc + parseInt(curr.quantity || 0), 0);
-      const availableQty = totalPurchasedQty - totalSoldQty;
-
-      if (enteredQty > availableQty) {
-        toast.error(`❌ Only ${availableQty} tyres available for item ${index + 1}. Cannot sell more than that.`);
-        return;
-      }
+  for (const [index, item] of formItems.entries()) {
+    if (!item.company || !item.brand || !item.model || !item.size || !item.price || !item.quantity || !item.customerName) {
+      toast.error(`Please fill all fields for item ${index + 1}`);
+      return;
     }
 
-    const newTransactionId = editTransactionId || uuidv4();
-    const date = formItems[0].date || new Date().toISOString().split("T")[0];
+    const enteredQty = parseInt(item.quantity);
+    const shopQty = parseInt(item.shopQuantity);
 
-    try {
-      for (const item of formItems) {
-        const purchasedQuery = query(
-          collection(db, "purchasedTyres"),
+    if (enteredQty > shopQty) {
+      toast.error(`❌ Only ${shopQty} tyres available in shop for item ${index + 1}. Cannot sell more than that.`);
+      return;
+    }
+  }
+
+  const newTransactionId = editTransactionId || uuidv4();
+  const date = formItems[0].date || new Date().toISOString().split("T")[0];
+  const customerName = formItems[0].customerName.toLowerCase().trim();
+  let descriptions = [];
+
+  try {
+    for (const item of formItems) {
+      const purchasedQuery = query(
+        collection(db, "purchasedTyres"),
+        where("company", "==", item.company),
+        where("brand", "==", item.brand),
+        where("model", "==", item.model),
+        where("size", "==", item.size)
+      );
+
+      const purchasedSnapshot = await getDocs(purchasedQuery);
+      const purchasedTyres = purchasedSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+
+      let remainingQty = parseInt(item.quantity);
+      for (const tyre of purchasedTyres) {
+        if (remainingQty <= 0) break;
+        const availableQty = parseInt(tyre.shop) || 0;
+        if (availableQty > 0) {
+          const deductQty = Math.min(availableQty, remainingQty);
+          await updateDoc(doc(db, "purchasedTyres", tyre.id), {
+            shop: availableQty - deductQty,
+          });
+          remainingQty -= deductQty;
+        }
+      }
+
+      const totalPayable = item.totalPrice || ((parseFloat(item.price) || 0) - (parseFloat(item.discount) || 0)) * (parseInt(item.quantity) || 0) - (parseFloat(item.due) || 0);
+
+      const soldTyreData = {
+        transactionId: newTransactionId,
+        company: item.company,
+        brand: item.brand,
+        model: item.model,
+        size: item.size,
+        price: parseFloat(item.price) || 0,
+        quantity: parseInt(item.quantity) || 0,
+        discount: parseFloat(item.discount) || 0,
+        due: parseFloat(item.due) || 0,
+        comment: item.comment || "",
+        bank: transactionBank || "",
+        customerName: item.customerName,
+        date,
+        createdAt: new Date(),
+        payableAmount: totalPayable,
+      };
+
+      if (editTransactionId) {
+        const soldQuery = query(
+          collection(db, "soldTyres"),
+          where("transactionId", "==", editTransactionId),
           where("company", "==", item.company),
           where("brand", "==", item.brand),
           where("model", "==", item.model),
           where("size", "==", item.size)
         );
-
-        const purchasedSnapshot = await getDocs(purchasedQuery);
-        const purchasedTyres = purchasedSnapshot.docs.map((doc) => ({
-          id: doc.id,
-          ...doc.data(),
-        }));
-
-        let remainingQty = parseInt(item.quantity);
-        for (const tyre of purchasedTyres) {
-          if (remainingQty <= 0) break;
-          const currentShopQty = parseInt(tyre.shop) || 0;
-          if (currentShopQty <= 0) continue;
-
-          const qtyToDeduct = Math.min(remainingQty, currentShopQty);
-          const newShopQty = currentShopQty - qtyToDeduct;
-          await updateDoc(doc(db, "purchasedTyres", tyre.id), {
-            shop: newShopQty.toString(),
-          });
-          remainingQty -= qtyToDeduct;
-        }
-
-        const saleData = {
-          transactionId: newTransactionId,
-          company: item.company,
-          brand: item.brand,
-          model: item.model,
-          size: item.size,
-          price: parseFloat(item.price) || 0,
-          quantity: parseInt(item.quantity) || 0,
-          discount: parseFloat(item.discount) || 0,
-          due: parseFloat(item.due) || 0,
-          comment: item.comment || "",
-          customerName: item.customerName,
-          date,
-          createdAt: new Date(),
-          payableAmount: ((parseFloat(item.price) || 0) - (parseFloat(item.discount) || 0)) * (parseInt(item.quantity) || 0),
-        };
-
-        if (editTransactionId) {
-          const existingDocs = await getDocs(
-            query(collection(db, "soldTyres"), where("transactionId", "==", editTransactionId))
-          );
-          for (const existingDoc of existingDocs.docs) {
-            await updateDoc(doc(db, "soldTyres", existingDoc.id), saleData);
-          }
+        const soldSnapshot = await getDocs(soldQuery);
+        if (!soldSnapshot.empty) {
+          await updateDoc(soldSnapshot.docs[0].ref, soldTyreData);
         } else {
-          await addDoc(collection(db, "soldTyres"), saleData);
+          await addDoc(collection(db, "soldTyres"), soldTyreData);
         }
+      } else {
+        await addDoc(collection(db, "soldTyres"), soldTyreData);
       }
 
-      setFormItems([initialItemState]);
-      setCustomerSearch("");
-      setEditTransactionId(null);
-      setEditingTyres(null);
-      setTransactionId(null);
-      toast.success(editTransactionId ? "✅ Transaction updated successfully!" : "✅ Tyres sold successfully!");
-    } catch (error) {
-      console.error("Error saving sale:", error);
-      toast.error("Failed to save sale: " + error.message);
+      descriptions.push(`${item.quantity} ${item.brand} ${item.size}`);
     }
-  };
 
-  const handleSellTyre = () => {
+    // Calculate totals
+    const totalDebit = formItems.reduce((sum, item) => {
+      const price = (parseFloat(item.price) || 0) - (parseFloat(item.discount) || 0);
+      return sum + price * (parseInt(item.quantity) || 0);
+    }, 0);
+
+    const totalDue = formItems.reduce((sum, item) => sum + (parseFloat(item.due) || 0), 0);
+    const totalCredit = totalDebit - totalDue;
+
+    // Add Ledger Entry - SALE
+    if (totalDebit > 0) {
+      await addDoc(collection(db, "customerLedgerEntries"), {
+        customerName,
+        date,
+        narration: `Sale_${newTransactionId}`,
+        description: `Tyres sold: ${descriptions.join(", ")}`,
+        debit: totalDebit,
+        credit: 0,
+        createdAt: new Date(),
+        invoiceNumber: newTransactionId,
+        paymentMethod: transactionBank ? "Bank" : "Cash",
+        bankName: transactionBank || "",
+      });
+    }
+
+    // Add Ledger Entry - PAYMENT
+    if (totalCredit > 0) {
+      await addDoc(collection(db, "customerLedgerEntries"), {
+        customerName,
+        date,
+        narration: `Payment_${newTransactionId}`,
+        description: transactionBank ? `Payment via ${transactionBank}` : "Payment via CASH",
+        debit: 0,
+        credit: totalCredit,
+        createdAt: new Date(),
+        invoiceNumber: newTransactionId,
+        paymentMethod: transactionBank ? "Bank" : "Cash",
+        bankName: transactionBank || "",
+      });
+    }
+
+    // Update or Add customerDetails
+    const customerQuery = query(collection(db, "customerDetails"), where("customerName", "==", customerName));
+    const customerSnapshot = await getDocs(customerQuery);
+
+    if (!customerSnapshot.empty) {
+      const customerDoc = customerSnapshot.docs[0];
+      const prevPaid = parseFloat(customerDoc.data().totalPaid) || 0;
+      const newTotalPaid = prevPaid + totalCredit;
+      const newDue = Math.max(0, totalDebit - newTotalPaid);
+
+      await updateDoc(customerDoc.ref, {
+        totalPaid: newTotalPaid,
+        due: newDue,
+      });
+    } else {
+      await addDoc(collection(db, "customerDetails"), {
+        customerName,
+        totalPaid: totalCredit,
+        due: Math.max(0, totalDebit - totalCredit),
+      });
+    }
+
+    // Final UI Reset
+    setFormItems([initialItemState]);
+    setCustomerSearch("");
+    setTransactionBank("");
+    setEditTransactionId(null);
+    setEditingTyres(null);
+    setTransactionId(newTransactionId);
+    setViewTransaction({
+      transactionId: newTransactionId,
+      customerName: formItems[0].customerName,
+      date,
+      bank: transactionBank || "",
+      items: formItems.map(item => ({
+        ...item,
+        payableAmount: item.totalPrice,
+        bank: transactionBank,
+      })),
+      totalPayable: formItems.reduce((sum, item) => sum + (item.totalPrice || 0), 0),
+    });
+    toast.success(editTransactionId ? "Transaction updated successfully!" : "Tyres sold successfully!");
+  } catch (error) {
+    console.error("Error processing sale:", error);
+    toast.error("Error processing sale: " + error.message);
+  }
+};
+
+
+
+
+  const handleSellTyre = (e) => {
+    e.preventDefault();
     setShowConfirmPopup(true);
   };
 
@@ -619,12 +666,12 @@ const SellTyre = () => {
     )
   );
 
-  const groupedByTransaction = filteredTyres.reduce((acc, tyre) => {
-    const tid = tyre.transactionId || tyre.id;
+  const groupedByTransaction = filteredTyres.reduce((acc, item) => {
+    const tid = item.transactionId || item.id;
     if (!acc[tid]) {
       acc[tid] = [];
     }
-    acc[tid].push(tyre);
+    acc[tid].push(item);
     return acc;
   }, {});
 
@@ -639,8 +686,9 @@ const SellTyre = () => {
     quantities: items.map(item => item.quantity).join(", "),
     prices: items.map(item => `Rs. ${item.price.toFixed(2)}`).join(", "),
     discounts: items.map(item => `Rs. ${item.discount || 0}`).join(", "),
+    bank: items[0]?.bank || "No Payment",
     comment: items[0]?.comment || "",
-    totalPayable: items.reduce((sum, item) => sum + (item.payableAmount || item.price * item.quantity), 0),
+    totalPayable: items.reduce((sum, item) => sum + (item.payableAmount || ((parseFloat(item.price) || 0) - (parseFloat(item.discount) || 0)) * (parseInt(item.quantity) || 0) - (parseFloat(item.due) || 0)), 0),
   }));
 
   const indexOfLastItem = currentPage * itemsPerPage;
@@ -656,18 +704,39 @@ const SellTyre = () => {
   };
 
   const calculateInvoiceTotals = (items) => {
+    const totalAmount = items.reduce((sum, item) => {
+      const price = parseFloat(item.price) || 0;
+      const discount = parseFloat(item.discount) || 0;
+      const quantity = parseInt(item.quantity) || 0;
+      return sum + ((price - discount) * quantity);
+    }, 0);
     const totalDues = items.reduce((sum, item) => sum + (parseFloat(item.due) || 0), 0);
-    const totalPayable = items.reduce((sum, item) => sum + (item.payableAmount || item.price * item.quantity), 0);
-    const totalPaid = totalPayable - totalDues;
-    return { totalDues, totalPaid, totalPayable };
+    const totalPaid = totalAmount - totalDues;
+    return { totalAmount, totalDues, totalPaid };
+  };
+
+  const calculateBrandTotals = (items) => {
+    const brandTotals = {};
+    items.forEach(item => {
+      const brand = item.brand || "Unknown";
+      const price = parseFloat(item.price) || 0;
+      const discount = parseFloat(item.discount) || 0;
+      const quantity = parseInt(item.quantity) || 0;
+      const amount = (price - discount) * quantity;
+      brandTotals[brand] = (brandTotals[brand] || 0) + amount;
+    });
+    return brandTotals;
+  };
+
+  const hasDiscount = (items) => {
+    return items.some(item => (parseFloat(item.discount) || 0) > 0);
   };
 
   return (
-    <div className="container mx-auto p-4">
-      <h1 className="text-2xl font-bold mb-4">🛒 Sell Tyres</h1>
-
-      <div className="mb-4">
-        <label className="block text-gray-700 font-semibold mb-2">Customer Name</label>
+    <div className="p-6 max-w-7xl mx-auto">
+      <h2 className="text-xl font-semibold mb-4">🛒 Sell Tyres</h2>
+      <div className="mb-6">
+        <label className="block text-gray-700 font-medium mb-2">Customer Name</label>
         <input
           type="text"
           value={customerSearch}
@@ -677,7 +746,10 @@ const SellTyre = () => {
           placeholder="Search customer..."
         />
         {isCustomerDropdownOpen && (
-          <div ref={customerDropdownRef} className="absolute bg-white border border-gray-300 rounded-lg mt-1 w-64 max-h-60 overflow-y-auto z-10">
+          <div
+            ref={customerDropdownRef}
+            className="absolute bg-white border border-gray-300 rounded-lg mt-1 w-64 max-h-60 overflow-y-auto z-10"
+          >
             {filteredCustomers.length > 0 ? (
               filteredCustomers.map((customer, idx) => (
                 <div
@@ -696,18 +768,18 @@ const SellTyre = () => {
       </div>
 
       {formItems.map((item, index) => (
-        <div key={index} className="border p-4 rounded-lg mb-4">
-          <h2 className="text-lg font-semibold mb-2">Item {index + 1}</h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div key={index} className="mb-6 p-4 border rounded-lg bg-gray-50">
+          <h3 className="text-lg font-semibold mb-4">Item {index + 1}</h3>
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
             <div>
-              <label className="block text-gray-700 font-semibold mb-2">Company</label>
+              <label className="block text-gray-700 font-medium mb-2">Party</label>
               <select
                 name="company"
                 value={item.company}
                 onChange={(e) => handleCompanyChange(e, index)}
                 className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-400 focus:outline-none"
               >
-                <option value="">Select Company</option>
+                <option value="">Select Party</option>
                 {availableCompanies.map((company, idx) => (
                   <option key={idx} value={company}>
                     {company}
@@ -715,9 +787,8 @@ const SellTyre = () => {
                 ))}
               </select>
             </div>
-
             <div>
-              <label className="block text-gray-700 font-semibold mb-2">Brand</label>
+              <label className="block text-gray-700 font-medium mb-2">Brand</label>
               <select
                 name="brand"
                 value={item.brand}
@@ -732,9 +803,8 @@ const SellTyre = () => {
                 ))}
               </select>
             </div>
-
             <div>
-              <label className="block text-gray-700 font-semibold mb-2">Model</label>
+              <label className="block text-gray-700 font-medium mb-2">Model</label>
               <select
                 name="model"
                 value={item.model}
@@ -749,9 +819,8 @@ const SellTyre = () => {
                 ))}
               </select>
             </div>
-
             <div>
-              <label className="block text-gray-700 font-semibold mb-2">Size</label>
+              <label className="block text-gray-700 font-medium mb-2">Size</label>
               <select
                 name="size"
                 value={item.size}
@@ -766,21 +835,18 @@ const SellTyre = () => {
                 ))}
               </select>
             </div>
-
             <div>
-              <label className="block text-gray-700 font-semibold mb-2">Price</label>
+              <label className="block text-gray-700 font-medium mb-2">Price</label>
               <input
-                type="text"
+                type="number"
                 name="price"
                 value={item.price}
                 onChange={(e) => handleChange(e, index)}
-                className="w-full p-2 border border-gray-300 rounded-lg bg-gray-100 cursor-not-allowed"
-                readOnly
+                className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-400 focus:outline-none"
               />
             </div>
-
             <div>
-              <label className="block text-gray-700 font-semibold mb-2">Quantity</label>
+              <label className="block text-gray-700 font-medium mb-2">Quantity</label>
               <input
                 type="number"
                 name="quantity"
@@ -789,9 +855,8 @@ const SellTyre = () => {
                 className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-400 focus:outline-none"
               />
             </div>
-
             <div>
-              <label className="block text-gray-700 font-semibold mb-2">Discount</label>
+              <label className="block text-gray-700 font-medium mb-2">Discount</label>
               <input
                 type="number"
                 name="discount"
@@ -800,9 +865,8 @@ const SellTyre = () => {
                 className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-400 focus:outline-none"
               />
             </div>
-
             <div>
-              <label className="block text-gray-700 font-semibold mb-2">Due</label>
+              <label className="block text-gray-700 font-medium mb-2">Due</label>
               <input
                 type="number"
                 name="due"
@@ -812,9 +876,8 @@ const SellTyre = () => {
                 placeholder="Enter due amount"
               />
             </div>
-
             <div>
-              <label className="block text-gray-700 font-semibold mb-2">Total Price</label>
+              <label className="block text-gray-700 font-medium mb-2">Total Price</label>
               <input
                 type="text"
                 value={`Rs. ${item.totalPrice.toLocaleString()}`}
@@ -822,9 +885,8 @@ const SellTyre = () => {
                 className="w-full p-2 border border-gray-300 rounded-lg bg-gray-100 cursor-not-allowed"
               />
             </div>
-
             <div>
-              <label className="block text-gray-700 font-semibold mb-2">Shop Quantity</label>
+              <label className="block text-gray-700 font-medium mb-2">Shop Quantity</label>
               <input
                 type="text"
                 value={item.shopQuantity}
@@ -832,9 +894,8 @@ const SellTyre = () => {
                 className="w-full p-2 border border-gray-300 rounded-lg bg-gray-100 cursor-not-allowed"
               />
             </div>
-
             <div>
-              <label className="block text-gray-700 font-semibold mb-2">Date</label>
+              <label className="block text-gray-700 font-medium mb-2">Date</label>
               <input
                 type="date"
                 name="date"
@@ -843,9 +904,8 @@ const SellTyre = () => {
                 className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-400 focus:outline-none"
               />
             </div>
-
             <div>
-              <label className="block text-gray-700 font-semibold mb-2">Comment</label>
+              <label className="block text-gray-700 font-medium mb-2">Comment</label>
               <input
                 type="text"
                 name="comment"
@@ -855,7 +915,6 @@ const SellTyre = () => {
               />
             </div>
           </div>
-
           {formItems.length > 1 && (
             <button
               onClick={() => removeItem(index)}
@@ -867,7 +926,18 @@ const SellTyre = () => {
         </div>
       ))}
 
-      <div className="flex justify-between mt-4">
+      <div className="mb-6">
+        <label className="block text-gray-700 font-medium mb-2">Bank</label>
+        <input
+          type="text"
+          value={transactionBank}
+          onChange={(e) => setTransactionBank(e.target.value)}
+          className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-400 focus:outline-none"
+          placeholder="Enter bank name"
+        />
+      </div>
+
+      <div className="flex gap-4 mb-6">
         <button
           onClick={addItem}
           className="px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition"
@@ -883,12 +953,13 @@ const SellTyre = () => {
       </div>
 
       {showConfirmPopup && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white p-6 rounded-lg shadow-lg max-w-md w-full">
-            <h2 className="text-xl font-bold mb-4">Confirm Transaction</h2>
+        <div className="fixed inset-0 bg-black bg-opacity-40 flex justify-center items-center z-50">
+          <div className="bg-white rounded-lg p-6 w-full max-w-md">
+            <h3 className="text-lg font-semibold mb-4">Confirm Transaction</h3>
             <div className="mb-4">
-              <p><strong>Customer:</strong> {formItems[0]?.customerName || "N/A"}</p>
-              <p><strong>Items:</strong></p>
+              <p className="font-medium">Customer: {formItems[0]?.customerName || "N/A"}</p>
+              <p className="font-medium">Bank: {transactionBank || "No Payment"}</p>
+              <p className="font-medium">Items:</p>
               <ul className="list-disc pl-5">
                 {formItems.map((item, idx) => (
                   <li key={idx}>
@@ -896,10 +967,12 @@ const SellTyre = () => {
                   </li>
                 ))}
               </ul>
-              <p><strong>Total:</strong> Rs. {formItems.reduce((sum, item) => sum + (item.totalPrice || 0), 0).toLocaleString()}</p>
+              <p className="font-medium mt-2">
+                Total: Rs. {formItems.reduce((sum, item) => sum + (item.totalPrice || 0), 0).toLocaleString()}
+              </p>
             </div>
             <p className="mb-4">Is this correct?</p>
-            <div className="flex justify-end gap-4">
+            <div className="flex justify-end gap-3">
               <button
                 onClick={handleCancelSell}
                 className="px-4 py-2 bg-gray-300 text-gray-800 rounded-lg hover:bg-gray-400 transition"
@@ -917,15 +990,15 @@ const SellTyre = () => {
         </div>
       )}
 
-      <div className="mt-8">
+      <div className="flex justify-between mb-6">
         <input
           type="text"
-          placeholder="Search transactions..."
+          placeholder="🔍 Search transactions..."
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
           className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-400 focus:outline-none mb-4"
         />
-        <div className="flex gap-4 mb-4">
+        <div className="flex gap-2">
           <div className="relative">
             <DatePicker
               selected={startDate}
@@ -938,7 +1011,7 @@ const SellTyre = () => {
               dateFormat="yyyy-MM-dd"
               isClearable
             />
-            <CalendarIcon className="absolute left-2 top-2.5 h-5 w-5 text-gray-400" />
+            <CalendarIcon className="w-5 h-5 text-gray-400 absolute left-3 top-2.5" />
           </div>
           <div className="relative">
             <DatePicker
@@ -953,101 +1026,86 @@ const SellTyre = () => {
               dateFormat="yyyy-MM-dd"
               isClearable
             />
-            <CalendarIcon className="absolute left-2 top-2.5 h-5 w-5 text-gray-400" />
+            <CalendarIcon className="w-5 h-5 text-gray-400 absolute left-3 top-2.5" />
           </div>
         </div>
-
-        {loading ? (
-          <div className="text-center py-4 text-gray-600">Loading sold items...</div>
-        ) : (
-          <>
-            <div className="overflow-x-auto">
-              <table className="min-w-full bg-white border border-gray-200">
-                <thead>
-                  <tr className="bg-gray-50">
-                    <th className="px-4 py-2 border text-left text-sm font-semibold text-gray-700">Customer</th>
-                    <th className="px-4 py-2 border text-left text-sm font-semibold text-gray-700">Brands</th>
-                    <th className="px-4 py-2 border text-left text-sm font-semibold text-gray-700">Models</th>
-                    <th className="px-4 py-2 border text-left text-sm font-semibold text-gray-700">Sizes</th>
-                    <th className="px-4 py-2 border text-left text-sm font-semibold text-gray-700">Quantities</th>
-                    <th className="px-4 py-2 border text-left text-sm font-semibold text-gray-700">Prices</th>
-                    <th className="px-4 py-2 border text-left text-sm font-semibold text-gray-700">Discounts</th>
-                    <th className="px-4 py-2 border text-left text-sm font-semibold text-gray-700">Total</th>
-                    <th className="px-4 py-2 border text-left text-sm font-semibold text-gray-700">Date</th>
-                    <th className="px-4 py-2 border text-left text-sm font-semibold text-gray-700">Actions</th>
-                    <th className="px-4 py-2 border text-left text-sm font-semibold text-gray-700">Comment</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {currentTransactions.length > 0 ? (
-                    currentTransactions.map((transaction) => (
-                      <tr key={transaction.transactionId} className="hover:bg-gray-50">
-                        <td className="px-4 py-2 border text-gray-600">{transaction.customerName}</td>
-                        <td className="px-4 py-2 border text-gray-600">{transaction.brands}</td>
-                        <td className="px-4 py-2 border text-gray-600">{transaction.models}</td>
-                        <td className="px-4 py-2 border text-gray-600">{transaction.sizes}</td>
-                        <td className="px-4 py-2 border text-gray-600">{transaction.quantities}</td>
-                        <td className="px-4 py-2 border text-gray-600">{transaction.prices}</td>
-                        <td className="px-4 py-2 border text-gray-600">{transaction.discounts}</td>
-                        <td className="px-4 py-2 border text-gray-600">Rs. {transaction.totalPayable.toLocaleString()}</td>
-                        <td className="px-4 py-2 border text-gray-600">{transaction.date}</td>
-                        <td className="px-4 py-2 border">
-                          <div className="flex space-x-2">
-                            <button
-                              onClick={() => {
-                                const items = transaction.items.map(t => ({
-                                  ...t,
-                                  totalPrice: ((parseFloat(t.price) || 0) - (parseFloat(t.discount) || 0)) * (parseInt(t.quantity) || 0) - (parseFloat(t.due) || 0),
-                                }));
-                                setFormItems(items);
-                                setCustomerSearch(transaction.customerName);
-                                setEditTransactionId(transaction.transactionId);
-                                setEditingTyres(items);
-                                setTransactionId(transaction.transactionId);
-                              }}
-                              className="px-3 py-1 bg-yellow-500 text-white rounded-lg hover:bg-yellow-600 transition"
-                            >
-                              Edit
-                            </button>
-                            <button
-                              onClick={() => setViewTransaction({
-                                transactionId: transaction.transactionId,
-                                customerName: transaction.customerName,
-                                date: transaction.date,
-                                items: transaction.items,
-                                totalPayable: transaction.totalPayable,
-                              })}
-                              className="px-3 py-1 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition"
-                            >
-                              View
-                            </button>
-                          </div>
-                        </td>
-                        <td className="px-4 py-2 border text-gray-600">{transaction.comment}</td>
-                      </tr>
-                    ))
-                  ) : (
-                    <tr>
-                      <td colSpan="11" className="px-4 py-2 text-center text-gray-600">No transactions found.</td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-            <div className="flex justify-center mt-4 space-x-2">
-              {Array.from({ length: totalPages }, (_, i) => i + 1).map(number => (
-                <button
-                  key={number}
-                  onClick={() => paginate(number)}
-                  className={`px-3 py-1 rounded-lg ${currentPage === number ? 'bg-blue-500 text-white' : 'bg-gray-200 hover:bg-gray-300'}`}
-                >
-                  {number}
-                </button>
-              ))}
-            </div>
-          </>
-        )}
       </div>
+
+      {loading ? (
+        <div>Loading sold items...</div>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="min-w-full border-collapse text-sm text-left">
+            <thead>
+              <tr className="bg-gray-100">
+                <th className="py-2 px-4 font-semibold">Customer</th>
+                <th className="py-2 px-4 font-semibold">Brands</th>
+                <th className="py-2 px-4 font-semibold">Models</th>
+                <th className="py-2 px-4 font-semibold">Sizes</th>
+                <th className="py-2 px-4 font-semibold">Quantities</th>
+                <th className="py-2 px-4 font-semibold">Prices</th>
+                <th className="py-2 px-4 font-semibold">Discounts</th>
+                <th className="py-2 px-4 font-semibold">Bank</th>
+                <th className="py-2 px-4 font-semibold">Total</th>
+                <th className="py-2 px-4 font-semibold">Date</th>
+                <th className="py-2 px-4 font-semibold">Actions</th>
+                <th className="py-2 px-4 font-semibold">Comment</th>
+              </tr>
+            </thead>
+            <tbody>
+              {currentTransactions.length > 0 ? (
+                currentTransactions.map((transaction) => (
+                  <tr key={transaction.transactionId} className="border-b border-gray-200 hover:bg-gray-50">
+                    <td className="py-2 px-4">{transaction.customerName}</td>
+                    <td className="py-2 px-4">{transaction.brands}</td>
+                    <td className="py-2 px-4">{transaction.models}</td>
+                    <td className="py-2 px-4">{transaction.sizes}</td>
+                    <td className="py-2 px-4">{transaction.quantities}</td>
+                    <td className="py-2 px-4">{transaction.prices}</td>
+                    <td className="py-2 px-4">{transaction.discounts}</td>
+                    <td className="py-2 px-4">{transaction.bank}</td>
+                    <td className="py-2 px-4">Rs. {transaction.totalPayable.toLocaleString()}</td>
+                    <td className="py-2 px-4">{transaction.date}</td>
+                    <td className="py-2 px-4">
+                      <button
+                        onClick={() => setViewTransaction({
+                          transactionId: transaction.transactionId,
+                          customerName: transaction.customerName,
+                          date: transaction.date,
+                          bank: transaction.bank,
+                          items: transaction.items,
+                          totalPayable: transaction.totalPayable,
+                        })}
+                        className="px-3 py-1 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition"
+                      >
+                        View
+                      </button>
+                    </td>
+                    <td className="py-2 px-4">{transaction.comment}</td>
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td colSpan="12" className="py-2 px-4 text-center">
+                    No transactions found.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+          <div className="p-4 flex justify-center gap-2">
+            {Array.from({ length: totalPages }, (_, i) => i + 1).map(number => (
+              <button
+                key={number}
+                onClick={() => paginate(number)}
+                className={`px-3 py-1 rounded-lg ${currentPage === number ? 'bg-blue-500 text-white' : 'bg-gray-200 hover:bg-gray-300'}`}
+              >
+                {number}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {viewTransaction && (
         <div className="fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center z-50 animate-fade-in">
@@ -1065,7 +1123,6 @@ const SellTyre = () => {
                 <div className="customer-details grid gap-2 text-gray-700">
                   <p><strong>Name:</strong> {viewTransaction.customerName || 'N/A'}</p>
                   <p><strong>Address:</strong> {getCustomerDetails(viewTransaction.customerName).address}</p>
-                  <p><strong>Phone:</strong> {getCustomerDetails(viewTransaction.customerName).phone}</p>
                 </div>
               </div>
               <div className="section">
@@ -1075,28 +1132,37 @@ const SellTyre = () => {
                     <thead>
                       <tr className="bg-gray-50">
                         <th className="border border-gray-200 px-4 py-2 text-left font-semibold text-gray-700">Brand</th>
-                        <th className="border border-gray-200 px-4 py-2 text-left font-semibold text-gray-700">Model</th>
                         <th className="border border-gray-200 px-4 py-2 text-left font-semibold text-gray-700">Size</th>
+                        <th className="border border-gray-200 px-4 py-2 text-left font-semibold text-gray-700">Quntity</th>
                         <th className="border border-gray-200 px-4 py-2 text-left font-semibold text-gray-700">Price</th>
-                        <th className="border border-gray-200 px-4 py-2 text-left font-semibold text-gray-700">Quantity</th>
-                        <th className="border border-gray-200 px-4 py-2 text-left font-semibold text-gray-700">Discount</th>
+                        <th className="border border-gray-200 px-4 py-2 text-left font-semibold text-gray-700">Total Price</th>
+                        {hasDiscount(viewTransaction.items) && (
+                          <th className="border border-gray-200 px-4 py-2 text-left font-semibold text-gray-700">Discount</th>
+                        )}
+                        <th className="border border-gray-200 px-4 py-2 text-left font-semibold text-gray-700">Total Paid</th>
                         <th className="border border-gray-200 px-4 py-2 text-left font-semibold text-gray-700">Due</th>
-                        <th className="border border-gray-200 px-4 py-2 text-left font-semibold text-gray-700">Total</th>
+                        <th className="border border-gray-200 px-4 py-2 text-left font-semibold text-gray-700">Transaction</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {viewTransaction.items.map((item, idx) => (
-                        <tr key={idx} className="hover:bg-gray-50">
-                          <td className="border border-gray-200 px-4 py-2 text-gray-600">{item.brand}</td>
-                          <td className="border border-gray-200 px-4 py-2 text-gray-600">{item.model}</td>
-                          <td className="border border-gray-200 px-4 py-2 text-gray-600">{item.size}</td>
-                          <td className="border border-gray-200 px-4 py-2 text-gray-600">Rs. {item.price.toFixed(2)}</td>
-                          <td className="border border-gray-200 px-4 py-2 text-gray-600">{item.quantity}</td>
-                          <td className="border border-gray-200 px-4 py-2 text-gray-600">Rs. {item.discount || 0}</td>
-                          <td className="border border-gray-200 px-4 py-2 text-gray-600">Rs. {item.due || 0}</td>
-                          <td className="border border-gray-200 px-4 py-2 text-gray-600">Rs. {(item.payableAmount || item.price * item.quantity).toLocaleString()}</td>
-                        </tr>
-                      ))}
+                      {viewTransaction.items.map((item, idx) => {
+                        const brandTotals = calculateBrandTotals(viewTransaction.items);
+                        return (
+                          <tr key={idx} className="hover:bg-gray-50">
+                            <td className="border border-gray-200 px-4 py-2 text-gray-600">{item.brand}</td>
+                            <td className="border border-gray-200 px-4 py-2 text-gray-600">{item.size}</td>
+                            <td className="border border-gray-200 px-4 py-2 text-gray-600">{item.quantity}</td>
+                            <td className="border border-gray-200 px-4 py-2 text-gray-600"><span>{typeof item.price === 'number' ? item.price.toFixed(2) : '0.00'}</span></td>
+                            <td className="border border-gray-200 px-4 py-2 text-gray-600">{(((parseFloat(item.price) || 0) - (parseFloat(item.discount) || 0)) * (parseInt(item.quantity) || 0)).toLocaleString()}</td>
+                            {hasDiscount(viewTransaction.items) && (
+                              <td className="border border-gray-200 px-4 py-2 text-gray-600">{item.discount || 0}</td>
+                            )}
+                            <td className="border border-gray-200 px-4 py-2 text-gray-600">{(item.payableAmount || ((parseFloat(item.price) || 0) - (parseFloat(item.discount) || 0)) * (parseInt(item.quantity) || 0) - (parseFloat(item.due) || 0)).toLocaleString()}</td>
+                            <td className="border border-gray-200 px-4 py-2 text-gray-600">{item.due || 0}</td>
+                            <td className="border border-gray-200 px-4 py-2 text-gray-600">{viewTransaction.bank ? viewTransaction.bank : "No Payment"}</td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
@@ -1104,9 +1170,9 @@ const SellTyre = () => {
               <div className="section">
                 <div className="total-section flex justify-end">
                   <div className="total-box bg-gray-50 p-4 rounded-lg w-80">
-                    <p>Total Amount: {calculateInvoiceTotals(viewTransaction.items).totalPayable.toLocaleString()}</p>
-                    <p>Total Paid: {calculateInvoiceTotals(viewTransaction.items).totalPaid.toLocaleString()}</p>
-                    <p>Total Dues: {calculateInvoiceTotals(viewTransaction.items).totalDues.toLocaleString()}</p>
+                    <p>Total Amount: Rs. {calculateInvoiceTotals(viewTransaction.items).totalAmount.toLocaleString()}</p>
+                    <p>Total Paid: Rs. {calculateInvoiceTotals(viewTransaction.items).totalPaid.toLocaleString()}</p>
+                    <p>Total Dues: Rs. {calculateInvoiceTotals(viewTransaction.items).totalDues.toLocaleString()}</p>
                   </div>
                 </div>
               </div>
@@ -1116,7 +1182,7 @@ const SellTyre = () => {
                 <p>Status: Sold</p>
               </div>
             </div>
-            <div className="flex justify-end space-x-4 mt-6">
+            <div className="flex justify-end space-x-4 mt-6 print:hidden">
               <button
                 onClick={handlePrint}
                 className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition"

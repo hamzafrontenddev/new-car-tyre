@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { db } from '../firebase';
-import { collection, onSnapshot, addDoc, doc, updateDoc } from 'firebase/firestore';
+import { collection, onSnapshot, addDoc, doc, updateDoc, getDocs, query, where } from 'firebase/firestore';
 import { toast, ToastContainer } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 import Modal from 'react-modal';
@@ -15,12 +15,19 @@ const parseDateSafely = (date) => {
   if (date instanceof Date) return date;
   if (typeof date === 'string') {
     const parsed = new Date(date);
-    return isNaN(parsed.getTime()) ? new Date() : parsed; // Fallback to current date if invalid
+    return isNaN(parsed.getTime()) ? new Date() : parsed;
   }
-  return new Date(); // Fallback if date is undefined/null
+  return new Date();
+};
+
+// Helper function to validate and parse numbers
+const parseNumber = (value, defaultValue = 0) => {
+  const parsed = parseFloat(value);
+  return isNaN(parsed) ? defaultValue : parsed;
 };
 
 const CustomerLedger = () => {
+  const [customers, setCustomers] = useState([]);
   const [sellData, setSellData] = useState([]);
   const [customerDetails, setCustomerDetails] = useState([]);
   const [brandDetails, setBrandDetails] = useState([]);
@@ -35,14 +42,11 @@ const CustomerLedger = () => {
   const [rowsPerPage] = useState(5);
   const [customerFormData, setCustomerFormData] = useState({
     customerName: '',
-    brand: '',
-    size: '',
     totalBrands: 0,
     totalItems: 0,
     totalCost: '',
     totalPaid: '',
     due: '',
-    brandDue: '',
     paymentMethod: '',
     bankName: '',
   });
@@ -54,58 +58,110 @@ const CustomerLedger = () => {
     startDate: null,
     endDate: null,
   });
+  const [isLoading, setIsLoading] = useState(true);
+  const [errorMessage, setErrorMessage] = useState('');
 
   useEffect(() => {
+    setIsLoading(true);
+    setErrorMessage('');
+
+    // Fetch customers for dropdown
+    const fetchCustomers = async () => {
+      try {
+        const q = query(collection(db, "users"), where("userType", "==", "Customer"));
+        const snapshot = await getDocs(q);
+        const customerData = snapshot.docs.map(doc => ({
+          name: doc.data().name || 'Unknown',
+        }));
+        setCustomers(customerData);
+        console.log('Customers fetched:', customerData);
+        if (customerData.length === 0) {
+          console.warn('No customers found in users collection.');
+        }
+      } catch (error) {
+        console.error("Error fetching customers:", error);
+        toast.error("Failed to load customers");
+        setErrorMessage('Failed to load customers. Please check your connection or Firestore rules.');
+      }
+    };
+
+    fetchCustomers();
+
+    // Fetch soldTyres
     const unsubscribeSell = onSnapshot(collection(db, 'soldTyres'), (snapshot) => {
-      const sellList = snapshot.docs.map(doc => ({
+      const sellList = snapshot.docs.map(doc => {
+        const data = doc.data() || {}; // Default to empty object if undefined
+        console.log('Raw soldTyres data:', doc.id, data);
+        return {
+          id: doc.id,
+          ...data,
+          date: data.date?.toDate ? data.date.toDate() : parseDateSafely(data.date || Date.now()),
+          customerName: data.customerName || 'Unknown',
+          price: parseNumber(data.price),
+          quantity: parseNumber(data.quantity, 1),
+          totalPrice: parseNumber(data.totalPrice),
+          due: parseNumber(data.due, 0),
+        };
+      });
+      const uniqueSellList = Array.from(new Map(sellList.map(item => [item.id, item])).values());
+      setSellData(uniqueSellList);
+      console.log('sellData fetched (deduplicated):', uniqueSellList);
+      setIsLoading(false);
+      if (uniqueSellList.length === 0) {
+        setErrorMessage('No sales data found. Please add sales via the Sell page.');
+      }
+    }, (error) => {
+      console.error("Error fetching soldTyres:", error);
+      toast.error("Failed to load sales data");
+      setErrorMessage('Failed to load sales data. Check Firestore permissions or connectivity.');
+      setIsLoading(false);
+    });
+
+    // Fetch customerDetails with real-time updates
+    const unsubscribeCustomerDetails = onSnapshot(collection(db, 'customerDetails'), (snapshot) => {
+      const detailsList = snapshot.docs.map(doc => ({
         id: doc.id,
         ...doc.data(),
-        date: doc.data().date?.toDate ? doc.data().date.toDate() : parseDateSafely(doc.data().date || Date.now())
+        totalPaid: parseNumber(doc.data().totalPaid, 0),
+        due: parseNumber(doc.data().due, 0),
       }));
-      setSellData(sellList);
-
-      // Automatically add debit entries for new sales
-      sellList.forEach(async (item) => {
-        if (!item.invoiceNumber) return; // Skip if no invoice number
-        const existingLedgerEntry = ledgerEntries.find(entry => entry.invoiceNumber === item.invoiceNumber);
-        if (!existingLedgerEntry) {
-          try {
-            await addDoc(collection(db, 'customerLedgerEntries'), {
-              customerName: (item.customerName || 'N/A').toLowerCase(),
-              brand: item.brand || 'N/A',
-              size: item.size || 'N/A',
-              invoiceNumber: item.invoiceNumber,
-              date: parseDateSafely(item.date).toISOString().split('T')[0],
-              narration: `${item.size || 'N/A'} ${item.brand || 'N/A'} Qty_${item.quantity}_Rate_${item.price}`,
-              debit: item.price * item.quantity,
-              credit: 0,
-              createdAt: new Date(),
-            });
-          } catch (error) {
-            console.error('Error adding automatic debit entry:', error);
-          }
-        }
-      });
-    });
-
-    const unsubscribeCustomerDetails = onSnapshot(collection(db, 'customerDetails'), (snapshot) => {
-      const detailsList = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       setCustomerDetails(detailsList);
+      console.log('customerDetails fetched:', detailsList);
+    }, (error) => {
+      console.error("Error fetching customerDetails:", error);
     });
 
+    // Fetch brandDetails
     const unsubscribeBrandDetails = onSnapshot(collection(db, 'brandDetails'), (snapshot) => {
       const brandList = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       setBrandDetails(brandList);
+      console.log('brandDetails fetched:', brandList);
+    }, (error) => {
+      console.error("Error fetching brandDetails:", error);
     });
 
+    // Fetch customerLedgerEntries
     const unsubscribeLedger = onSnapshot(collection(db, 'customerLedgerEntries'), (snapshot) => {
-      const ledgerList = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data(),
-        date: doc.data().date?.toDate ? doc.data().date.toDate() : parseDateSafely(doc.data().date || Date.now()),
-        createdAt: doc.data().createdAt?.toDate ? doc.data().createdAt.toDate() : parseDateSafely(doc.data().date || Date.now()),
-      }));
+      const ledgerList = snapshot.docs.map(doc => {
+        const data = doc.data() || {}; // Default to empty object if undefined
+        return {
+          id: doc.id,
+          ...data,
+          date: data.date?.toDate ? data.date.toDate() : parseDateSafely(data.date || Date.now()),
+          createdAt: data.createdAt?.toDate ? data.createdAt.toDate() : parseDateSafely(data.createdAt || Date.now()),
+          customerName: data.customerName || 'Unknown',
+          debit: parseNumber(data.debit, 0),
+          credit: parseNumber(data.credit, 0),
+          narration: data.narration || '',
+          paymentMethod: data.paymentMethod || '',
+          bankName: data.bankName || '',
+          description: data.description || '',
+        };
+      });
       setLedgerEntries(ledgerList);
+      console.log('ledgerEntries fetched:', ledgerList);
+    }, (error) => {
+      console.error("Error fetching customerLedgerEntries:", error);
     });
 
     return () => {
@@ -114,66 +170,154 @@ const CustomerLedger = () => {
       unsubscribeBrandDetails();
       unsubscribeLedger();
     };
-  }, [ledgerEntries]); // Add ledgerEntries as dependency to check for existing entries
+  }, []);
 
   const customerSummary = useMemo(() => {
+    console.log('Computing customerSummary...');
     const customerMap = {};
+    const processedSaleKeys = new Set();
 
-    sellData.forEach(item => {
-      const customer = item.customerName || 'N/A';
-      if (!customerMap[customer]) {
-        customerMap[customer] = { totalItems: 0, totalCost: 0, brands: {} };
-      }
-      const itemDate = parseDateSafely(item.date);
-      customerMap[customer].totalItems += item.quantity;
-      customerMap[customer].totalCost += item.price * item.quantity;
-      if (!customerMap[customer].brands[item.brand]) {
-        customerMap[customer].brands[item.brand] = { totalItems: 0, totalCost: 0, sizes: new Set(), dates: new Set() };
-      }
-      customerMap[customer].brands[item.brand].totalItems += item.quantity;
-      customerMap[customer].brands[item.brand].totalCost += item.price * item.quantity;
-      if (item.size) customerMap[customer].brands[item.brand].sizes.add(item.size);
-      if (item.date) customerMap[customer].brands[item.brand].dates.add(itemDate.toISOString().split('T')[0]);
-    });
-
-    return Object.keys(customerMap).map(customer => {
-      const details = customerDetails.find(detail => detail.customerName === customer) || {};
-      const totalCost = customerMap[customer].totalCost;
-      const totalPaid = parseFloat(details.totalPaid) || 0;
-      const due = (totalCost - totalPaid).toFixed(2);
-      return {
-        customer,
-        totalItems: customerMap[customer].totalItems,
-        totalCost,
-        totalPaid,
-        due: parseFloat(due) >= 0 ? parseFloat(due) : 0,
-        brands: customerMap[customer].brands,
+    // Initialize customerMap with customers from users
+    customers.forEach(customer => {
+      const customerName = customer.name.trim().toLowerCase();
+      customerMap[customerName] = {
+        totalItems: 0,
+        totalCost: 0,
+        totalPaid: 0,
+        totalDue: 0,
+        brands: {}
       };
     });
-  }, [sellData, customerDetails]);
+
+    // Process sales data (soldTyres)
+    sellData.forEach((item, index) => {
+      if (!item.customerName || typeof item.customerName !== 'string') {
+        console.warn(`Invalid customerName in soldTyres[${index}]:`, item);
+        return;
+      }
+      const customer = item.customerName.trim().toLowerCase();
+      const saleKey = `${item.id}-${customer}-${item.date?.toISOString() || ''}-${item.price || 0}-${item.quantity || 1}`;
+      if (processedSaleKeys.has(saleKey)) {
+        console.log(`Skipping duplicate sale: ID=${item.id}, Key=${saleKey}`);
+        return;
+      }
+      processedSaleKeys.add(saleKey);
+
+      if (!customerMap[customer]) {
+        customerMap[customer] = {
+          totalItems: 0,
+          totalCost: 0,
+          totalPaid: 0,
+          totalDue: 0,
+          brands: {}
+        };
+      }
+      const itemDate = parseDateSafely(item.date);
+      const totalPrice = parseNumber(item.totalPrice) || parseNumber(item.price) * parseNumber(item.quantity, 1);
+      const quantity = parseNumber(item.quantity, 1);
+
+      console.log(`Processing sale for ${customer} [ID: ${item.id}, Key: ${saleKey}]: totalPrice=${totalPrice}, quantity=${quantity}`);
+
+      customerMap[customer].totalItems += quantity;
+      customerMap[customer].totalCost += totalPrice;
+
+      const brand = item.brand || 'Unknown';
+      if (!customerMap[customer].brands[brand]) {
+        customerMap[customer].brands[brand] = {
+          totalItems: 0,
+          totalCost: 0,
+          sizes: new Set(),
+          dates: new Set()
+        };
+      }
+      customerMap[customer].brands[brand].totalItems += quantity;
+      customerMap[customer].brands[brand].totalCost += totalPrice;
+      if (item.size) customerMap[customer].brands[brand].sizes.add(item.size);
+      if (itemDate) customerMap[customer].brands[brand].dates.add(itemDate.toISOString().split('T')[0]);
+    });
+
+    // Process customerDetails to update totalPaid and totalDue
+    customerDetails.forEach(detail => {
+      const customerName = detail.customerName.trim().toLowerCase();
+      if (customerMap[customerName]) {
+        customerMap[customerName].totalPaid = parseNumber(detail.totalPaid);
+        customerMap[customerName].totalDue = parseNumber(detail.due) || (customerMap[customerName].totalCost - customerMap[customerName].totalPaid);
+      }
+    });
+
+    // Process ledger entries
+    ledgerEntries.forEach(entry => {
+      const customer = (entry.customerName || '').trim().toLowerCase();
+      if (!customer || customer === 'unknown') {
+        console.warn('Invalid customerName in ledgerEntry:', entry);
+        return;
+      }
+      if (!customerMap[customer]) {
+        customerMap[customer] = {
+          totalItems: 0,
+          totalCost: 0,
+          totalPaid: 0,
+          totalDue: 0,
+          brands: {}
+        };
+      }
+      const debit = parseNumber(entry.debit);
+      const credit = parseNumber(entry.credit);
+
+      console.log(`Processing ledger for ${customer}: debit=${debit}, credit=${credit}`);
+
+      if (debit > 0 && !entry.narration?.startsWith('Sale_')) {
+        customerMap[customer].totalCost += debit;
+      }
+      
+      customerMap[customer].totalDue = Math.max(0, customerMap[customer].totalCost - customerMap[customer].totalPaid);
+    });
+
+    const summary = Object.keys(customerMap)
+      .filter(customer => customer !== 'unknown')
+      .map(customer => ({
+        customer: customer.charAt(0).toUpperCase() + customer.slice(1),
+        totalItems: customerMap[customer].totalItems,
+        totalCost: customerMap[customer].totalCost,
+        totalPaid: customerMap[customer].totalPaid,
+        totalDue: customerMap[customer].totalDue,
+        brands: customerMap[customer].brands,
+      }));
+
+    console.log('customerSummary computed:', summary);
+    return summary;
+  }, [sellData, customers, ledgerEntries, customerDetails]);
 
   const filteredCustomers = customerSummary.filter(item =>
-    item.customer.toLowerCase().includes(searchQuery.toLowerCase())
+    item.customer.toLowerCase().includes(searchQuery.trim().toLowerCase())
   );
+  console.log('Filtered customers:', filteredCustomers);
 
   const getSaleSummary = (customerName) => {
-    const customer = customerSummary.find(item => item.customer === customerName);
+    const customer = customerSummary.find(item => item.customer.toLowerCase() === customerName.toLowerCase());
     if (!customer) return [];
 
     const saleSizeMap = {};
 
     sellData
-      .filter(item => (item.customerName || 'N/A') === customerName)
+      .filter(item => (item.customerName || '').trim().toLowerCase() === customerName.toLowerCase())
       .forEach(item => {
         const itemDate = parseDateSafely(item.date);
         const startDate = saleFilterDates.startDate;
         const endDate = saleFilterDates.endDate;
-        const brand = item.brand;
+        const brand = item.brand || 'Unknown';
         const size = item.size || 'N/A';
 
-        if (startDate && endDate) {
-          if (!(itemDate >= startDate && itemDate <= endDate)) return;
+        if (startDate && endDate && !(itemDate >= startDate && itemDate <= endDate)) {
+          return;
         }
+
+        const totalPrice = parseNumber(item.totalPrice) || parseNumber(item.price) * parseNumber(item.quantity, 1);
+        const quantity = parseNumber(item.quantity, 1);
+        const due = parseNumber(item.due);
+        const paid = totalPrice - due;
+
+        console.log(`Sale summary for ${customerName}: brand=${brand}, size=${size}, totalPrice=${totalPrice}`);
 
         const key = `${brand}-${size}`;
         if (!saleSizeMap[key]) {
@@ -182,13 +326,17 @@ const CustomerLedger = () => {
             size,
             totalItems: 0,
             totalCost: 0,
+            totalPaid: 0,
+            totalDue: 0,
             dates: new Set(),
             earliestDate: itemDate,
           };
         }
 
-        saleSizeMap[key].totalItems += item.quantity;
-        saleSizeMap[key].totalCost += item.price * item.quantity;
+        saleSizeMap[key].totalItems += quantity;
+        saleSizeMap[key].totalCost += totalPrice;
+        saleSizeMap[key].totalPaid += paid;
+        saleSizeMap[key].totalDue += due;
         if (item.date) saleSizeMap[key].dates.add(itemDate.toISOString().split('T')[0]);
         if (itemDate < saleSizeMap[key].earliestDate) {
           saleSizeMap[key].earliestDate = itemDate;
@@ -196,22 +344,16 @@ const CustomerLedger = () => {
       });
 
     const saleSummary = Object.values(saleSizeMap)
-      .map(entry => {
-        const details = brandDetails.find(detail => detail.customerName === customerName && detail.brand === entry.brand && detail.size === entry.size) || {};
-        const totalCost = entry.totalCost;
-        const totalPaid = parseFloat(details.totalPaid) || 0;
-        const due = (totalCost - totalPaid).toFixed(2);
-        return {
-          brand: entry.brand,
-          totalItems: entry.totalItems,
-          totalCost: totalCost.toFixed(2),
-          totalPaid,
-          due: parseFloat(due) >= 0 ? parseFloat(due) : 0,
-          sizes: entry.size,
-          date: Array.from(entry.dates).sort((a, b) => parseDateSafely(a) - parseDateSafely(b)).join(', ') || 'N/A',
-          earliestDate: entry.earliestDate,
-        };
-      })
+      .map(entry => ({
+        brand: entry.brand,
+        totalItems: entry.totalItems,
+        totalCost: entry.totalCost.toFixed(2),
+        totalPaid: entry.totalPaid.toFixed(2),
+        totalDue: entry.totalDue.toFixed(2),
+        sizes: entry.size,
+        date: Array.from(entry.dates).sort().join(', ') || 'N/A',
+        earliestDate: entry.earliestDate,
+      }))
       .filter(entry => {
         const query = saleSearchQuery.toLowerCase();
         return (
@@ -227,14 +369,14 @@ const CustomerLedger = () => {
   };
 
   const totalSalePages = (customerName) => {
-    const customer = customerSummary.find(item => item.customer === customerName);
+    const customer = customerSummary.find(item => item.customer.toLowerCase() === customerName.toLowerCase());
     if (!customer) return 1;
 
     const saleSizeSet = new Set();
     sellData
-      .filter(item => (item.customerName || 'N/A') === customerName)
+      .filter(item => (item.customerName || '').trim().toLowerCase() === customerName.toLowerCase())
       .forEach(item => {
-        const brand = item.brand;
+        const brand = item.brand || 'Unknown';
         const size = item.size || 'N/A';
         const key = `${brand}-${size}`;
         const query = saleSearchQuery.toLowerCase();
@@ -250,72 +392,80 @@ const CustomerLedger = () => {
   };
 
   const getTotalBrands = (customerName) => {
-    const customer = customerSummary.find(item => item.customer === customerName);
+    const customer = customerSummary.find(item => item.customer.toLowerCase() === customerName.toLowerCase());
     return customer ? Object.keys(customer.brands).length : 0;
   };
 
   const getLedgerForCustomer = (customerName) => {
-    const customer = customerSummary.find(item => item.customer === customerName);
-    if (!customer) return { ledgerData: [], totalDebit: 0, totalCredit: 0 };
+    console.log('Fetching ledger for customer:', customerName);
+    const customer = customerSummary.find(item => item.customer.toLowerCase() === customerName.toLowerCase());
+    if (!customer) {
+      console.warn('Customer not found in customerSummary:', customerName);
+      return { ledgerData: [], totalDebit: 0, totalCredit: 0 };
+    }
 
     let balance = 0;
     const sortedEntries = ledgerEntries
-      .filter(entry => entry.customerName === customerName.toLowerCase()) // Normalize case
+      .filter(entry => {
+        const entryCustomer = (entry.customerName || '').trim().toLowerCase();
+        return entryCustomer === customerName.toLowerCase();
+      })
       .filter(entry => {
         const entryDate = parseDateSafely(entry.date);
         const { startDate, endDate } = ledgerFilterDates;
-        if (startDate && endDate) {
-          return entryDate >= startDate && entryDate <= endDate;
-        }
-        return true;
+        return startDate && endDate ? (entryDate >= startDate && entryDate <= endDate) : true;
       })
       .sort((a, b) => parseDateSafely(a.createdAt) - parseDateSafely(b.createdAt))
       .map((entry, index) => {
-        const debit = parseFloat(entry.debit) || 0;
-        const credit = parseFloat(entry.credit) || 0;
+        if (!entry) {
+          console.warn('Invalid entry skipped:', entry);
+          return null;
+        }
+        const debit = parseNumber(entry.debit);
+        const credit = parseNumber(entry.credit);
         balance += debit - credit;
+
+        let description = 'Unknown';
+        if (debit > 0) {
+          if (entry.narration?.startsWith('Sale_')) {
+            const transactionId = entry.narration.replace('Sale_', '');
+            const sales = sellData.filter(sale => sale.transactionId === transactionId);
+            description = sales.length > 0 ? sales.map(sale => {
+              const size = sale.size || 'N/A';
+              const brand = sale.brand || 'Unknown';
+              const quantity = parseNumber(sale.quantity, 1);
+              const price = parseNumber(sale.price);
+              return `${size}_${brand}_Qty_${quantity}_Rate_${price}`;
+            }).join(', ') : 'Sale (Details Not Found)';
+          } else {
+            description = entry.description || entry.narration || 'Manual Debit';
+          }
+        } else if (credit > 0) {
+          description = entry.paymentMethod === 'Bank' ? `Payment via ${entry.bankName || 'N/A'}` : 'Cash Payment';
+        }
+
         return {
           index: index + 1,
-          date: parseDateSafely(entry.date).toISOString().split('T')[0],
-          description: entry.narration || 'N/A',
-          invoice: entry.invoiceNumber || '-',
-          debit,
-          credit,
-          balance: balance,
-          balanceType: balance >= 0 ? 'Cr' : 'Dr',
-          balanceDisplay: Math.abs(balance),
+          date: parseDateSafely(entry.date).toISOString().split('T')[0] || 'N/A',
+          description: description || 'N/A',
+          debit: debit || 0,
+          credit: credit || 0,
+          balance: balance || 0,
+          balanceDisplay: Math.abs(balance) || 0,
         };
-      });
+      })
+      .filter(entry => entry !== null);
 
-    const totalDebit = sortedEntries.reduce((sum, entry) => sum + (parseFloat(entry.debit) || 0), 0);
-    const totalCredit = sortedEntries.reduce((sum, entry) => sum + (parseFloat(entry.credit) || 0), 0);
+    const totalDebit = sortedEntries.reduce((sum, entry) => sum + (entry.debit || 0), 0);
+    const totalCredit = sortedEntries.reduce((sum, entry) => sum + (entry.credit || 0), 0);
+    console.log('Ledger data for', customerName, ':', sortedEntries);
 
     return { ledgerData: sortedEntries, totalDebit, totalCredit };
   };
 
   const getBrandsForCustomer = (customerName) => {
-    const customer = customerSummary.find(item => item.customer === customerName);
+    const customer = customerSummary.find(item => item.customer.toLowerCase() === customerName.toLowerCase());
     return customer ? Object.keys(customer.brands).sort() : [];
-  };
-
-  const getSizesForBrand = (customerName, brand) => {
-    const customer = customerSummary.find(item => item.customer === customerName);
-    return customer && customer.brands[brand] ? Array.from(customer.brands[brand].sizes).sort() : [];
-  };
-
-  const getBrandSizeMetrics = (customerName, brand, size) => {
-    let totalItems = 0;
-    let totalCost = 0;
-    sellData
-      .filter(item => (item.customerName || 'N/A') === customerName && item.brand === brand && item.size === size)
-      .forEach(item => {
-        totalItems += item.quantity;
-        totalCost += item.price * item.quantity;
-      });
-    const brandDetail = brandDetails.find(detail => detail.customerName === customerName && detail.brand === brand && detail.size === size) || {};
-    const totalPaid = parseFloat(brandDetail.totalPaid) || 0;
-    const due = (totalCost - totalPaid).toFixed(2);
-    return { totalItems, totalCost: totalCost.toFixed(2), totalPaid, due };
   };
 
   const openModal = (customer) => {
@@ -339,14 +489,11 @@ const CustomerLedger = () => {
     setAddCustomerModalIsOpen(false);
     setCustomerFormData({
       customerName: '',
-      brand: '',
-      size: '',
       totalBrands: 0,
       totalItems: 0,
       totalCost: '',
       totalPaid: '',
       due: '',
-      brandDue: '',
       paymentMethod: '',
       bankName: '',
     });
@@ -367,37 +514,16 @@ const CustomerLedger = () => {
     const updatedFormData = { ...customerFormData, [name]: value };
 
     if (name === 'customerName') {
-      updatedFormData.brand = '';
-      updatedFormData.size = '';
-      updatedFormData.totalBrands = getTotalBrands(value);
-      updatedFormData.totalItems = 0;
-      updatedFormData.totalCost = '';
-      updatedFormData.totalPaid = '';
-      updatedFormData.due = '';
-      updatedFormData.brandDue = '';
-      updatedFormData.paymentMethod = '';
-      updatedFormData.bankName = '';
-      const customerData = customerSummary.find(item => item.customer === value);
-      const customerDetailsData = customerDetails.find(detail => detail.customerName === value) || {};
+      console.log('Customer selected:', value);
+      const customerData = customerSummary.find(item => item.customer.toLowerCase() === value.toLowerCase());
+      console.log('Matching customer in customerSummary:', customerData);
+      updatedFormData.totalBrands = customerData ? getTotalBrands(value) : 0;
       updatedFormData.totalItems = customerData ? customerData.totalItems : 0;
       updatedFormData.totalCost = customerData ? customerData.totalCost.toFixed(2) : '';
-      updatedFormData.due = customerData ? (customerData.totalCost - (parseFloat(customerDetailsData.totalPaid) || 0)).toFixed(2) : '';
-    }
-
-    if (name === 'brand') {
-      updatedFormData.size = '';
-      updatedFormData.totalItems = 0;
-      updatedFormData.totalCost = '';
-      updatedFormData.totalPaid = '';
-      updatedFormData.brandDue = '';
-    }
-
-    if (name === 'size') {
-      const metrics = getBrandSizeMetrics(updatedFormData.customerName, updatedFormData.brand, value);
-      updatedFormData.totalItems = metrics.totalItems;
-      updatedFormData.totalCost = metrics.totalCost;
-      updatedFormData.totalPaid = metrics.totalPaid;
-      updatedFormData.brandDue = metrics.due;
+      updatedFormData.totalPaid = customerData ? customerData.totalPaid.toFixed(2) : '';
+      updatedFormData.due = customerData ? customerData.totalDue.toFixed(2) : '';
+      updatedFormData.paymentMethod = '';
+      updatedFormData.bankName = '';
     }
 
     if (name === 'paymentMethod') {
@@ -405,24 +531,20 @@ const CustomerLedger = () => {
     }
 
     if (name === 'totalPaid') {
-      const metrics = getBrandSizeMetrics(updatedFormData.customerName, updatedFormData.brand, updatedFormData.size);
-      const totalCost = parseFloat(metrics.totalCost) || 0;
-      const existingTotalPaid = parseFloat(metrics.totalPaid) || 0;
-      const newPayment = parseFloat(value) || 0;
-      const customerData = customerSummary.find(item => item.customer === updatedFormData.customerName);
-      updatedFormData.due = customerData ? (customerData.totalCost - (parseFloat(customerDetails.find(detail => detail.customerName === updatedFormData.customerName)?.totalPaid || 0) + newPayment)).toFixed(2) : '';
-      updatedFormData.brandDue = (totalCost - (existingTotalPaid + newPayment)).toFixed(2);
+      const customerData = customerSummary.find(item => item.customer.toLowerCase() === updatedFormData.customerName.toLowerCase());
+      const newPayment = parseNumber(value);
+      updatedFormData.due = customerData ? (customerData.totalCost - (customerData.totalPaid + newPayment)).toFixed(2) : '';
     }
 
     setCustomerFormData(updatedFormData);
   };
 
-  const handleAddCustomerDetails = async (e) => {
+  const handleAddPayment = async (e) => {
     e.preventDefault();
-    const { customerName, brand, size, totalPaid, paymentMethod, bankName } = customerFormData;
+    const { customerName, totalPaid, paymentMethod, bankName } = customerFormData;
 
-    if (!customerName || !brand || !size || !totalPaid || !paymentMethod) {
-      toast.error('Please fill all required fields (Customer Name, Brand, Size, Total Paid, Payment Method)');
+    if (!customerName || !totalPaid || !paymentMethod) {
+      toast.error('Please fill all required fields (Customer Name, Amount, Payment Method)');
       return;
     }
 
@@ -431,118 +553,61 @@ const CustomerLedger = () => {
       return;
     }
 
-    const customerData = customerSummary.find(item => item.customer === customerName);
-    const brandDetailExists = brandDetails.find(detail => detail.customerName === customerName && detail.brand === brand && detail.size === size);
-    const customerExists = customerDetails.find(detail => detail.customerName === customerName);
-
+    const customerData = customerSummary.find(item => item.customer.toLowerCase() === customerName.toLowerCase());
     if (!customerData) {
       toast.error('Customer not found in sales data');
       return;
     }
 
-    const todayDate = new Date().toISOString().split('T')[0];
-    const createdAt = new Date();
-    let narration = '';
-    let debit = 0;
-    let credit = 0;
-
-    if (paymentMethod === 'Bank') {
-      narration = `ONLINE bY ${bankName}`;
-      credit = parseFloat(totalPaid) || 0;
-    } else if (paymentMethod === 'Debit Card') {
-      const latestSale = sellData
-        .filter(item => (item.customerName || 'N/A') === customerName && item.brand === brand && item.size === size)
-        .sort((a, b) => parseDateSafely(b.date) - parseDateSafely(a.date))[0];
-      if (latestSale) {
-        narration = `${latestSale.size || 'N/A'} ${latestSale.model || 'N/A'} ${latestSale.brand || 'N/A'} ${latestSale.quantity || 0}X${parseFloat(latestSale.price || 0)}`;
-      } else {
-        narration = 'Debit Payment';
-      }
-      debit = parseFloat(totalPaid) || 0;
+    const confirmSave = window.confirm(`Are you sure you want to save a payment of Rs. ${totalPaid} for ${customerName}?`);
+    if (!confirmSave) {
+      toast.info('Payment cancelled');
+      return;
     }
 
-    try {
-      if (brandDetailExists) {
-        const brandDoc = doc(db, 'brandDetails', brandDetailExists.id);
-        const existingTotalPaid = parseFloat(brandDetailExists.totalPaid) || 0;
-        const newTotalPaid = existingTotalPaid + (parseFloat(totalPaid) || 0);
-        const brandTotalCost = parseFloat(customerFormData.totalCost) || 0;
-        const newDue = (brandTotalCost - newTotalPaid).toFixed(2);
-        await updateDoc(brandDoc, {
-          customerName,
-          brand,
-          size,
-          totalPaid: newTotalPaid,
-          due: parseFloat(newDue) >= 0 ? parseFloat(newDue) : 0,
-          paymentMethod,
-          bankName: paymentMethod === 'Bank' ? bankName : '',
-          date: todayDate,
-          totalItems: customerFormData.totalItems,
-          totalCost: parseFloat(customerFormData.totalCost),
-        });
-      } else {
-        const brandTotalCost = parseFloat(customerFormData.totalCost) || 0;
-        const newDue = (brandTotalCost - parseFloat(totalPaid)).toFixed(2);
-        await addDoc(collection(db, 'brandDetails'), {
-          customerName,
-          brand,
-          size,
-          totalPaid: parseFloat(totalPaid),
-          due: parseFloat(newDue) >= 0 ? parseFloat(newDue) : 0,
-          paymentMethod,
-          bankName: paymentMethod === 'Bank' ? bankName : '',
-          date: todayDate,
-          totalItems: customerFormData.totalItems,
-          totalCost: parseFloat(customerFormData.totalCost),
-        });
-      }
+    const todayDate = new Date().toISOString().split('T')[0];
+    const createdAt = new Date();
+    const description = paymentMethod === 'Bank' ? `Payment via ${bankName}` : 'Cash Payment';
+    const credit = parseNumber(totalPaid);
 
-      let customerTotalPaid = 0;
-      brandDetails
-        .filter(detail => detail.customerName === customerName)
-        .forEach(detail => {
-          customerTotalPaid += parseFloat(detail.totalPaid) || 0;
-        });
-      customerTotalPaid += parseFloat(totalPaid) || 0;
+    try {
+      const customerExists = customerDetails.find(detail => detail.customerName.toLowerCase() === customerName.toLowerCase());
+      let customerTotalPaid = (customerData.totalPaid || 0) + credit;
+      let customerTotalDue = (customerData.totalCost || 0) - customerTotalPaid;
 
       if (customerExists) {
         const customerDoc = doc(db, 'customerDetails', customerExists.id);
-        const customerTotalCost = customerData.totalCost;
-        const customerDue = (customerTotalCost - customerTotalPaid).toFixed(2);
         await updateDoc(customerDoc, {
           customerName,
           totalPaid: customerTotalPaid,
-          due: parseFloat(customerDue) >= 0 ? parseFloat(customerDue) : 0,
+          due: customerTotalDue >= 0 ? customerTotalDue : 0,
           date: todayDate,
         });
       } else {
-        const customerTotalCost = customerData.totalCost;
-        const customerDue = (customerTotalCost - customerTotalPaid).toFixed(2);
         await addDoc(collection(db, 'customerDetails'), {
           customerName,
           totalPaid: customerTotalPaid,
-          due: parseFloat(customerDue) >= 0 ? parseFloat(customerDue) : 0,
+          due: customerTotalDue >= 0 ? customerTotalDue : 0,
           date: todayDate,
         });
       }
 
       await addDoc(collection(db, 'customerLedgerEntries'), {
-        customerName: customerName.toLowerCase(),
-        brand,
-        size,
-        invoiceNumber: `RV${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+        customerName: customerName.toLowerCase().trim(),
         date: todayDate,
-        narration,
-        debit,
+        description,
+        debit: 0,
         credit,
+        paymentMethod,
+        bankName: paymentMethod === 'Bank' ? bankName : '',
         createdAt,
       });
 
-      toast.success('Customer details saved successfully');
+      toast.success('Customer payment saved successfully');
       closeAddCustomerModal();
     } catch (error) {
-      toast.error('Error saving details');
-      console.error(error);
+      console.error('Error saving payment:', error);
+      toast.error('Error saving payment');
     }
   };
 
@@ -553,14 +618,22 @@ const CustomerLedger = () => {
     }
 
     const { ledgerData, totalDebit, totalCredit } = getLedgerForCustomer(selectedCustomer.customer);
-
     if (!ledgerData.length) {
       toast.error('No ledger data available for printing');
       return;
     }
 
-    const printWindow = window.open('', '_blank');
-    printWindow.document.write(`
+    // Ensure all data is safe for rendering and serialization
+    const safeLedgerData = ledgerData.map(entry => ({
+      index: entry.index || 1,
+      date: entry.date || 'N/A',
+      description: entry.description || 'N/A',
+      debit: entry.debit || 0,
+      credit: entry.credit || 0,
+      balanceDisplay: entry.balanceDisplay || 0,
+    }));
+
+    const printContent = `
       <html>
         <head>
           <title>${selectedCustomer.customer} Ledger</title>
@@ -578,8 +651,6 @@ const CustomerLedger = () => {
             th, td { border: 1px solid #000; padding: 10px 8px; text-align: right; }
             th { background-color: #000; color: white; text-align: center; }
             td.text-left { text-align: left; }
-            .balance-cr { color: red; font-weight: bold; }
-            .balance-dr { color: green; font-weight: bold; }
             .total-row td { font-weight: bold; }
             .footer { margin-top: 20px; text-align: center; color: #666; font-size: 12px; }
           </style>
@@ -588,7 +659,7 @@ const CustomerLedger = () => {
           <div class="container">
             <div class="header">
               <div class="title">SARHAD TYRE TRADERS</div>
-              <div class="party">Party Name: ${selectedCustomer.customer}</div>
+              <div class="party">Customer Name: ${selectedCustomer.customer || 'Unknown'}</div>
               <div class="account">ACCOUNT LEDGER</div>
               <div class="date-range">Date ${new Date(ledgerFilterDates.startDate || '2024-01-01').toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' }).toUpperCase()} - ${new Date(ledgerFilterDates.endDate || new Date()).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' }).toUpperCase()}</div>
               <div class="date">Date: ${new Date().toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true }).toUpperCase()}</div>
@@ -597,24 +668,36 @@ const CustomerLedger = () => {
             <table>
               <thead>
                 <tr>
+                  <th>Sr No</th>
                   <th>Date</th>
                   <th>Description</th>
-                  <th>Invoice #</th>
-                  <th>Debit (PKR)</th>
-                  <th>Credit (PKR)</th>
-                  <th>Balance (PKR)</th>
+                  <th>Debit</th>
+                  <th>Credit</th>
+                  <th>Balance</th>
                 </tr>
               </thead>
               <tbody>
-                ${ledgerData.map(entry => `
-                  <tr>
-                    <td>${entry.date}</td>
-                    <td class="text-left">${entry.description}</td>
-                    <td>${entry.invoice}</td>
-                    <td>${entry.debit > 0 ? `PKR ${entry.debit.toLocaleString()}` : '-'}</td>
-                    <td>${entry.credit > 0 ? `PKR ${entry.credit.toLocaleString()}` : '-'}</td>
-                    <td class="${entry.balance >= 0 ? 'balance-cr' : 'balance-dr'}">${entry.balanceDisplay.toLocaleString()} ${entry.balanceType}</td>
-                  </tr>
+                ${safeLedgerData.map(entry => `
+                  ${entry.debit > 0 ? `
+                    <tr>
+                      <td>${entry.index}</td>
+                      <td>${entry.date}</td>
+                      <td class="text-left">${entry.description}</td>
+                      <td>${entry.debit.toLocaleString()}</td>
+                      <td>0</td>
+                      <td>${entry.balanceDisplay.toLocaleString()}</td>
+                    </tr>
+                  ` : ''}
+                  ${entry.credit > 0 ? `
+                    <tr>
+                      <td>${entry.index}</td>
+                      <td>${entry.date}</td>
+                      <td class="text-left">${entry.description}</td>
+                      <td>0</td>
+                      <td>${entry.credit.toLocaleString()}</td>
+                      <td>${entry.balanceDisplay.toLocaleString()}</td>
+                    </tr>
+                  ` : ''}
                 `).join('')}
                 <tr class="total-row">
                   <td colspan="3">Total:</td>
@@ -630,14 +713,25 @@ const CustomerLedger = () => {
           </div>
           <script>
             window.onload = () => {
-              window.print();
-              window.onafterprint = () => window.close();
+              try {
+                window.print();
+                window.onafterprint = () => window.close();
+              } catch (e) {
+                console.error('Print error:', e);
+              }
             };
           </script>
         </body>
       </html>
-    `);
-    printWindow.document.close();
+    `;
+
+    const printWindow = window.open('', '_blank');
+    if (printWindow) {
+      printWindow.document.write(printContent);
+      printWindow.document.close();
+    } else {
+      toast.error('Failed to open print window. Please check popup blockers.');
+    }
   };
 
   return (
@@ -651,95 +745,116 @@ const CustomerLedger = () => {
           placeholder="Search by customer..."
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
-          className="w-full sm:w-1/3 px-4 py-3 border border-gray-200 rounded-xl shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white text-gray-700 transition duration-200"
+          className="w-full sm:w-1/3 px-4 py-3 border border-gray-300 rounded-xl shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white text-gray-900 transition duration-200"
         />
         <button
           onClick={openAddCustomerModal}
           className="px-6 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-xl shadow hover:shadow-lg hover:from-blue-700 hover:to-indigo-700 transition duration-300"
         >
-          Add Customer Payment Details
+          Add Customer Payment
         </button>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {filteredCustomers.map((item, index) => (
-          <div
-            key={index}
-            className="bg-white border border-gray-100 p-6 rounded-2xl shadow-lg hover:shadow-xl transition duration-300 cursor-pointer transform hover:-translate-y-1"
-            onClick={() => openModal(item)}
-          >
-            <h2 className="text-xl font-semibold text-gray-800">{item.customer}</h2>
-            <p className="text-sm text-gray-500 mt-2">Total Items: {item.totalItems}</p>
-            <p className="text-sm text-gray-500">Total Cost: Rs. {item.totalCost.toLocaleString()}</p>
-            <p className="text-sm text-gray-500">Total Paid: Rs. {item.totalPaid.toLocaleString()}</p>
-            <p className="text-sm text-gray-500">Due: Rs. {item.due.toLocaleString()}</p>
-          </div>
-        ))}
-      </div>
+      {isLoading ? (
+        <div className="text-center text-gray-600 mt-8">
+          <div className="inline-block animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-blue-600"></div>
+          <p className="mt-2 text-lg">Loading customer data...</p>
+        </div>
+      ) : errorMessage || filteredCustomers.length === 0 ? (
+        <div className="text-center text-gray-600 mt-8 bg-white p-6 rounded-xl shadow-sm">
+          <p className="text-lg font-semibold mb-2">{errorMessage || 'No customers found.'}</p>
+          <p className="text-sm">
+            {errorMessage
+              ? 'Please check your Firestore setup or contact support.'
+              : 'Add sales data via the Sell page or ensure customers exist in the system.'}
+          </p>
+          {customers.length > 0 && !sellData.length && (
+            <p className="text-sm mt-2">Customers available: {customers.map(c => c.name).join(', ')}</p>
+          )}
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {filteredCustomers.map((item, index) => (
+            <div
+              key={index}
+              className="bg-white border border-gray-200 p-6 rounded-xl shadow-md hover:shadow-lg transition duration-300 cursor-pointer transform hover:-translate-y-1"
+              onClick={() => openModal(item)}
+            >
+              <h2 className="text-xl font-semibold text-gray-800 mb-2">{item.customer}</h2>
+              <p className="text-sm text-gray-600">Total Items: {item.totalItems}</p>
+              <p className="text-sm text-gray-600">Total Cost: Rs. {item.totalCost.toLocaleString()}</p>
+              <p className="text-sm text-gray-600">Total Paid: Rs. {item.totalPaid.toLocaleString()}</p>
+              <p className="text-sm text-gray-600">Due: Rs. {item.totalDue.toLocaleString()}</p>
+            </div>
+          ))}
+        </div>
+      )}
 
       <Modal
         isOpen={modalIsOpen}
         onRequestClose={closeModal}
-        className="bg-white p-6 rounded-2xl shadow-2xl w-full max-w-4xl mx-auto mt-16 max-h-[70vh] overflow-y-auto"
-        overlayClassName="fixed inset-0 bg-black bg-opacity-70 flex justify-center items-center backdrop-blur-sm"
+        className="bg-white p-6 rounded-xl shadow-2xl w-full max-w-4xl mx-auto mt-16 max-h-[70vh] overflow-y-auto"
+        overlayClassName="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center backdrop-blur-sm"
       >
         {selectedCustomer && (
           <div className="relative">
             <button
               onClick={closeModal}
-              className="absolute top-4 right-4 p-2 text-gray-500 hover:text-gray-700 transition duration-200"
+              className="absolute top-4 right-4 p-2 text-gray-500 hover:bg-gray-200 rounded-full transition duration-200"
             >
               <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
               </svg>
             </button>
-            <h2 className="text-3xl font-bold mb-6 text-gray-900 bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text">
+            <h2 className="text-3xl font-semibold mb-6 text-gray-900 bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text">
               {selectedCustomer.customer} Details
             </h2>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
-              <div className="bg-gray-50 p-4 rounded-xl shadow-sm hover:shadow-md transition duration-200">
-                <p className="text-sm font-medium text-gray-600">Customer Name</p>
+              <div className="bg-gray-50 p-4 rounded-xl shadow-sm">
+                <p className="text-sm font-medium mb-1 text-gray-600">Customer Name</p>
                 <p className="text-lg font-semibold text-gray-800">{selectedCustomer.customer}</p>
               </div>
-              <div className="bg-gray-50 p-4 rounded-xl shadow-sm hover:shadow-md transition duration-200">
-                <p className="text-sm font-medium text-gray-600">Total Items</p>
+              <div className="bg-gray-50 p-4 rounded-xl shadow-sm">
+                <p className="text-sm font-medium mb-1 text-gray-600">Total Items</p>
                 <p className="text-lg font-semibold text-gray-800">{selectedCustomer.totalItems}</p>
               </div>
-              <div className="bg-gray-50 p-4 rounded-xl shadow-sm hover:shadow-md transition duration-200">
-                <p className="text-sm font-medium text-gray-600">Total Cost</p>
+              <div className="bg-gray-50 p-4 rounded-xl shadow-sm">
+                <p className="text-sm font-medium mb-1 text-gray-600">Total Cost</p>
                 <p className="text-lg font-semibold text-gray-800">Rs. {selectedCustomer.totalCost.toLocaleString()}</p>
               </div>
-              <div className="bg-gray-50 p-4 rounded-xl shadow-sm hover:shadow-md transition duration-200">
-                <p className="text-sm font-medium text-gray-600">Total Paid</p>
+              <div className="bg-gray-50 p-4 rounded-xl shadow-sm">
+                <p className="text-sm font-medium mb-1 text-gray-600">Total Paid</p>
                 <p className="text-lg font-semibold text-gray-800">Rs. {selectedCustomer.totalPaid.toLocaleString()}</p>
               </div>
-              <div className="bg-gray-50 p-4 rounded-xl shadow-sm hover:shadow-md transition duration-200">
-                <p className="text-sm font-medium text-gray-600">Total Due</p>
-                <p className="text-lg font-semibold text-gray-800">Rs. {selectedCustomer.due.toLocaleString()}</p>
+              <div className="bg-gray-50 p-4 rounded-xl shadow-sm">
+                <p className="text-sm font-medium mb-1 text-gray-600">Total Due</p>
+                <p className="text-lg font-semibold text-gray-800">Rs. {selectedCustomer.totalDue.toLocaleString()}</p>
               </div>
             </div>
             <div className="flex justify-end mb-4">
               <button
                 onClick={() => openLedgerModal(selectedCustomer)}
-                className="px-6 py-2 bg-gradient-to-r from-green-500 to-teal-500 text-white rounded-xl hover:from-green-600 hover:to-teal-600 transition duration-200"
+                className="px-6 py-2 bg-gradient-to-r from-green-500 to-teal-500 text-white rounded-xl hover:from-green-600 hover:to-teal-600 transition duration-300"
               >
                 View Ledger
               </button>
             </div>
-            <h3 className="text-xl font-semibold text-gray-800 mb-4">Sale Details</h3>
+            <h3 className="text-xl font-semibold mb-4 text-gray-800">Sale Details</h3>
             <div className="flex flex-col sm:flex-row gap-4 mb-4">
-              <input
-                type="text"
-                placeholder="Search by brand or size..."
-                value={saleSearchQuery}
-                onChange={(e) => {
-                  setSaleSearchQuery(e.target.value);
-                  setCurrentPage(1);
-                }}
-                className="w-full sm:w-1/3 px-4 py-2 border border-gray-200 rounded-xl shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-700"
-              />
+              <div>
+                <input
+                  type="text"
+                  placeholder="Search by brand or size..."
+                  value={saleSearchQuery}
+                  onChange={(e) => {
+                    setSaleSearchQuery(e.target.value);
+                    setCurrentPage(1);
+                  }}
+                  className="w-full sm:w-1/3 px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-800"
+                />
+              </div>
               <div className="flex gap-3">
-                <div className="relative">
+                <div className="relative w-full">
                   <DatePicker
                     selected={saleFilterDates.startDate}
                     onChange={(date) => setSaleFilterDates(prev => ({ ...prev, startDate: date }))}
@@ -747,13 +862,13 @@ const CustomerLedger = () => {
                     startDate={saleFilterDates.startDate}
                     endDate={saleFilterDates.endDate}
                     placeholderText="Start Date"
-                    className="w-full px-4 py-2 border border-gray-200 rounded-xl shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-700"
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-800"
                     dateFormat="dd/MM/yyyy"
                     isClearable
                   />
                   <CalendarIcon className="w-5 h-5 text-gray-500 absolute right-3 top-1/2 transform -translate-y-1/2" />
                 </div>
-                <div className="relative">
+                <div className="relative w-full">
                   <DatePicker
                     selected={saleFilterDates.endDate}
                     onChange={(date) => setSaleFilterDates(prev => ({ ...prev, endDate: date }))}
@@ -762,7 +877,7 @@ const CustomerLedger = () => {
                     endDate={saleFilterDates.endDate}
                     minDate={saleFilterDates.startDate}
                     placeholderText="End Date"
-                    className="w-full px-4 py-2 border border-gray-200 rounded-xl shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-700"
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-800"
                     dateFormat="dd/MM/yyyy"
                     isClearable
                   />
@@ -771,28 +886,24 @@ const CustomerLedger = () => {
               </div>
             </div>
             <div className="overflow-x-auto">
-              <table className="min-w-full border-collapse text-sm text-left bg-white rounded-xl shadow-sm">
+              <table className="min-w-full border-collapse border border-gray-200 text-sm">
                 <thead>
                   <tr className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white">
-                    <th className="py-3 px-6 font-semibold border border-black">Brand</th>
-                    <th className="py-3 px-6 font-semibold border border-black">Sizes</th>
-                    <th className="py-3 px-6 font-semibold border border-black">Total Items</th>
-                    <th className="py-3 px-6 font-semibold border border-black">Total Cost</th>
-                    <th className="py-3 px-6 font-semibold border border-black">Total Paid</th>
-                    <th className="py-3 px-6 font-semibold border border-black">Due</th>
-                    <th className="py-3 px-6 font-semibold border border-black">Sale Date</th>
+                    <th className="py-3 px-4 text-sm font-semibold">Brand</th>
+                    <th className="py-3 px-4 text-sm font-semibold">Sizes</th>
+                    <th className="py-3 px-4 text-sm font-semibold">Total Items</th>
+                    <th className="py-3 px-4 text-sm font-semibold">Total Cost</th>
+                    <th className="py-3 px-4 text-sm font-semibold">Sale Dates</th>
                   </tr>
                 </thead>
                 <tbody>
                   {getSaleSummary(selectedCustomer.customer).map((sale, index) => (
-                    <tr key={index} className="border-b border-gray-200 hover:bg-gray-50 transition duration-200">
-                      <td className="py-3 px-6 border border-black">{sale.brand}</td>
-                      <td className="py-3 px-6 border border-black">{sale.sizes}</td>
-                      <td className="py-3 px-6 border border-black">{sale.totalItems}</td>
-                      <td className="py-3 px-6 border border-black">Rs. {parseFloat(sale.totalCost).toLocaleString()}</td>
-                      <td className="py-3 px-6 border border-black">Rs. {sale.totalPaid.toLocaleString()}</td>
-                      <td className="py-3 px-6 border border-black">Rs. {sale.due.toLocaleString()}</td>
-                      <td className="py-3 px-6 border border-black">{sale.date}</td>
+                    <tr key={index} className="border-b hover:bg-gray-50 transition duration-200">
+                      <td className="py-3 px-4 text-center">{sale.brand}</td>
+                      <td className="py-3 px-4 text-center">{sale.sizes}</td>
+                      <td className="py-3 px-4 text-center">{sale.totalItems}</td>
+                      <td className="py-3 px-4 text-center">Rs. {parseFloat(sale.totalCost).toLocaleString()}</td>
+                      <td className="py-3 px-4 text-center">{sale.date}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -803,7 +914,7 @@ const CustomerLedger = () => {
                 <button
                   key={page}
                   onClick={() => setCurrentPage(page)}
-                  className={`px-4 py-2 rounded-xl ${currentPage === page ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'} transition duration-200`}
+                  className={`px-4 py-2 rounded-full ${currentPage === page ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-800 hover:bg-gray-300'} transition duration-200`}
                 >
                   {page}
                 </button>
@@ -812,7 +923,7 @@ const CustomerLedger = () => {
             <div className="flex justify-end mt-6">
               <button
                 onClick={closeModal}
-                className="px-6 py-2 bg-gradient-to-r from-red-500 to-pink-500 text-white rounded-xl hover:from-red-600 hover:to-pink-600 transition duration-200"
+                className="px-6 py-2 bg-gradient-to-r from-red-500 to-pink-600 text-white rounded-lg hover:from-red-600 hover:to-pink-600 transition duration-300"
               >
                 Close
               </button>
@@ -824,208 +935,163 @@ const CustomerLedger = () => {
       <Modal
         isOpen={addCustomerModalIsOpen}
         onRequestClose={closeAddCustomerModal}
-        className="bg-white p-6 rounded-2xl shadow-xl w-full max-w-2xl mx-auto mt-16 max-h-[70vh] overflow-y-auto"
+        className="bg-white p-6 rounded-xl shadow-xl w-full max-w-2xl mx-auto mt-16 max-h-[70vh] overflow-y-auto"
         overlayClassName="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center"
       >
-        <h2 className="text-2xl font-bold mb-6 text-gray-800 bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text">
-          Add Customer Payment Details
-        </h2>
-        <form onSubmit={handleAddCustomerDetails} className="flex flex-wrap gap-4">
-          <div className="w-full md:w-[48%]">
-            <label className="block text-sm font-medium mb-1 text-gray-700">Customer Name</label>
-            <input
-              type="text"
-              name="customerName"
-              value={customerFormData.customerName}
-              onChange={handleCustomerFormChange}
-              list="customerNames"
-              className="w-full px-4 py-2 border border-gray-200 rounded-xl shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              required
-            />
-            <datalist id="customerNames">
-              {customerSummary.map((item, index) => (
-                <option key={index} value={item.customer} />
-              ))}
-            </datalist>
-          </div>
-          <div className="w-full md:w-[48%]">
-            <label className="block text-sm font-medium mb-1 text-gray-700">Brand</label>
-            <input
-              type="text"
-              name="brand"
-              value={customerFormData.brand}
-              onChange={handleCustomerFormChange}
-              list="brandNames"
-              className="w-full px-4 py-2 border border-gray-200 rounded-xl shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              required
-            />
-            <datalist id="brandNames">
-              {getBrandsForCustomer(customerFormData.customerName).map((brand, index) => (
-                <option key={index} value={brand} />
-              ))}
-            </datalist>
-          </div>
-          <div className="w-full md:w-[48%]">
-            <label className="block text-sm font-medium mb-1 text-gray-700">Size</label>
-            <input
-              type="text"
-              name="size"
-              value={customerFormData.size}
-              onChange={handleCustomerFormChange}
-              list="sizeNames"
-              className="w-full px-4 py-2 border border-gray-200 rounded-xl shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              required
-            />
-            <datalist id="sizeNames">
-              {getSizesForBrand(customerFormData.customerName, customerFormData.brand).map((size, index) => (
-                <option key={index} value={size} />
-              ))}
-            </datalist>
-          </div>
-          <div className="w-full md:w-[48%]">
-            <label className="block text-sm font-medium mb-1 text-gray-700">Total Brands</label>
-            <input
-              type="number"
-              name="totalBrands"
-              value={customerFormData.totalBrands}
-              className="w-full px-4 py-2 border border-gray-200 bg-gray-100 rounded-xl"
-              readOnly
-            />
-          </div>
-          <div className="w-full md:w-[48%]">
-            <label className="block text-sm font-medium mb-1 text-gray-700">Total Items (Brand)</label>
-            <input
-              type="number"
-              name="totalItems"
-              value={customerFormData.totalItems}
-              className="w-full px-4 py-2 border border-gray-200 bg-gray-100 rounded-xl"
-              readOnly
-            />
-          </div>
-          <div className="w-full md:w-[48%]">
-            <label className="block text-sm font-medium mb-1 text-gray-700">Total Cost (Brand)</label>
-            <input
-              type="number"
-              name="totalCost"
-              value={customerFormData.totalCost}
-              className="w-full px-4 py-2 border border-gray-200 bg-gray-100 rounded-xl"
-              readOnly
-            />
-          </div>
-          <div className="w-full md:w-[48%]">
-            <label className="block text-sm font-medium mb-1 text-gray-700">Payment Amount</label>
-            <input
-              type="number"
-              name="totalPaid"
-              value={customerFormData.totalPaid}
-              onChange={handleCustomerFormChange}
-              className="w-full px-4 py-2 border border-gray-200 rounded-xl shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              required
-            />
-          </div>
-          <div className="w-full md:w-[48%]">
-            <label className="block text-sm font-medium mb-1 text-gray-700">Due (Customer)</label>
-            <input
-              type="number"
-              name="due"
-              value={customerFormData.due}
-              className="w-full px-4 py-2 border border-gray-200 bg-gray-100 rounded-xl"
-              readOnly
-            />
-          </div>
-          <div className="w-full md:w-[48%]">
-            <label className="block text-sm font-medium mb-1 text-gray-700">Due (Brand)</label>
-            <input
-              type="number"
-              name="brandDue"
-              value={customerFormData.brandDue}
-              className="w-full px-4 py-2 border border-gray-200 bg-gray-100 rounded-xl"
-              readOnly
-            />
-          </div>
-          <div className="w-full md:w-[48%]">
-            <label className="block text-sm font-medium mb-1 text-gray-700">Payment Method</label>
-            <select
-              name="paymentMethod"
-              value={customerFormData.paymentMethod}
-              onChange={handleCustomerFormChange}
-              className="w-full px-4 py-2 border border-gray-200 rounded-xl shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              required
-            >
-              <option value="">Select Payment Method</option>
-              <option value="Debit Card">Debit</option>
-              <option value="Bank">Bank</option>
-            </select>
-          </div>
-          {customerFormData.paymentMethod === 'Bank' && (
+        <div>
+          <h2 className="text-2xl font-bold mb-6 text-gray-800 bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text ">
+            Add Customer Payment
+          </h2>
+          <form onSubmit={handleAddPayment} className="flex flex-wrap gap-4">
             <div className="w-full md:w-[48%]">
-              <label className="block text-sm font-medium mb-1 text-gray-700">Bank Name</label>
-              <input
-                type="text"
-                name="bankName"
-                value={customerFormData.bankName}
+              <label className="block text-sm font-semibold mb-1 text-gray-700">Customer Name</label>
+              <select
+                name="customerName"
+                value={customerFormData.customerName}
                 onChange={handleCustomerFormChange}
-                className="w-full px-4 py-2 border border-gray-200 rounded-xl shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-800"
+                required
+              >
+                <option value="">Select Customer</option>
+                {customers.map((customer, index) => (
+                  <option key={index} value={customer.name}>{customer.name}</option>
+                ))}
+              </select>
+            </div>
+            <div className="w-full md:w-[48%]">
+              <label className="block text-sm font-semibold mb-1 text-gray-700">Total Brands</label>
+              <input
+                type="number"
+                name="totalBrands"
+                value={customerFormData.totalBrands}
+                className="w-full px-4 py-2 border border-gray-300 bg-gray-100 rounded-lg text-gray-800"
+                readOnly
+              />
+            </div>
+            <div className="w-full md:w-[48%]">
+              <label className="block text-sm font-semibold mb-1 text-gray-700">Total Items</label>
+              <input
+                type="number"
+                name="totalItems"
+                value={customerFormData.totalItems}
+                className="w-full px-4 py-2 border border-gray-300 bg-gray-100 rounded-lg text-gray-800"
+                readOnly
+              />
+            </div>
+            <div className="w-full md:w-[48%]">
+              <label className="block text-sm font-semibold mb-1 text-gray-700">Total Cost</label>
+              <input
+                type="number"
+                name="totalCost"
+                value={customerFormData.totalCost}
+                className="w-full px-4 py-2 border border-gray-300 bg-gray-100 rounded-lg text-gray-800"
+                readOnly
+              />
+            </div>
+            <div className="w-full md:w-[48%]">
+              <label className="block text-sm font-semibold mb-1 text-gray-700">Payment Amount</label>
+              <input
+                type="number"
+                name="totalPaid"
+                value={customerFormData.totalPaid}
+                onChange={handleCustomerFormChange}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-800"
                 required
               />
             </div>
-          )}
-          <div className="w-full flex justify-end gap-4 mt-6">
-            <button
-              type="button"
-              onClick={closeAddCustomerModal}
-              className="px-6 py-2 bg-gradient-to-r from-gray-500 to-gray-600 text-white rounded-xl hover:from-gray-600 hover:to-gray-700 transition duration-200"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              className="px-6 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-xl hover:from-blue-700 hover:to-indigo-700 transition duration-300"
-            >
-              Save
-            </button>
-          </div>
-        </form>
+            <div className="w-full md:w-[48%]">
+              <label className="block text-sm font-semibold mb-1 text-gray-700">Due</label>
+              <input
+                type="number"
+                name="due"
+                value={customerFormData.due}
+                className="w-full px-4 py-2 border border-gray-300 bg-gray-100 rounded-lg text-gray-800"
+                readOnly
+              />
+            </div>
+            <div className="w-full md:w-[48%]">
+              <label className="block text-sm font-semibold mb-1 text-gray-700">Payment Method</label>
+              <select
+                name="paymentMethod"
+                value={customerFormData.paymentMethod}
+                onChange={handleCustomerFormChange}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-800"
+                required
+              >
+                <option value="">Select Payment Method</option>
+                <option value="Cash">Cash</option>
+                <option value="Bank">Bank</option>
+              </select>
+            </div>
+            {customerFormData.paymentMethod === 'Bank' && (
+              <div className="w-full md:w-[48%]">
+                <label className="block text-sm font-semibold mb-1 text-gray-700">Bank Name</label>
+                <input
+                  type="text"
+                  name="bankName"
+                  value={customerFormData.bankName}
+                  onChange={handleCustomerFormChange}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-800"
+                  required
+                />
+              </div>
+            )}
+            <div className="w-full flex justify-end gap-4 mt-6">
+              <button
+                type="button"
+                onClick={closeAddCustomerModal}
+                className="px-6 py-2 bg-gradient-to-r from-gray-500 to-gray-600 text-white rounded-lg hover:from-gray-600 hover:to-gray-700 transition duration-200"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                className="px-6 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-lg hover:from-blue-700 hover:to-indigo-700 transition duration-200"
+              >
+                Save
+              </button>
+            </div>
+          </form>
+        </div>
       </Modal>
 
       <Modal
         isOpen={ledgerModalIsOpen}
         onRequestClose={closeLedgerModal}
-        className="bg-white p-6 rounded-2xl shadow-2xl w-full max-w-5xl mx-auto mt-16 max-h-[80vh] overflow-y-auto"
+        className="bg-white p-6 rounded-xl shadow-lg w-full max-w-5xl mx-auto mt-16 max-h-[80vh] overflow-y-auto"
         overlayClassName="fixed inset-0 bg-black bg-opacity-70 flex justify-center items-center backdrop-blur-sm"
       >
         {selectedCustomer && (
           <div className="relative">
             <button
               onClick={closeLedgerModal}
-              className="absolute top-4 right-4 p-2 text-gray-500 hover:text-gray-700 transition duration-200"
+              className="absolute top-4 right-4 p-2 text-gray-500 hover:bg-gray-200 rounded-full transition duration-200"
             >
               <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
               </svg>
             </button>
             <div className="header mb-6">
-              <h2 className="text-3xl font-bold text-center text-gray-900">SARHAD TYRE TRADERS</h2>
-              <p className="text-md font-bold text-black mt-2">Party Name: {selectedCustomer.customer}</p>
-              <div className="flex justify-between mt-3">
+              <h2 className="text-3xl font-bold text-center text-gray-800">SARHAD TYRE TRADERS</h2>
+              <p className="text-center text-lg font-semibold text-gray-600 mt-2">Customer Name: {selectedCustomer.customer}</p>
+              <div className="flex justify-between items-center mt-4">
                 <div>
                   <p className="text-sm font-medium text-gray-600">ACCOUNT LEDGER</p>
                   <p className="text-sm text-gray-500">
-                    Date {new Date(ledgerFilterDates.startDate || '2024-01-01').toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' }).toUpperCase()} - 
-                    {new Date(ledgerFilterDates.endDate || new Date()).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' }).toUpperCase()}
+                    Date ${new Date(ledgerFilterDates.startDate || '2023-01-01').toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' }).toUpperCase()} - ${new Date(ledgerFilterDates.endDate || Date.now()).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' }).toUpperCase()}
                   </p>
                 </div>
                 <div>
-                  <p className="text-sm text-gray-500 text-right">Page 1</p>
-                  <p className="text-sm font-medium text-gray-600">
-                    Date: {new Date().toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true }).toUpperCase()}
+                  <p className="text-sm text-gray-500 text-right">
+                    Date: ${new Date().toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true }).toUpperCase()}
                   </p>
+                  <p className="text-sm font-semibold text-gray-600 text-right">Page 1</p>
                 </div>
               </div>
             </div>
-            <div className="flex flex-col sm:flex-row gap-4 mb-4">
+            <div className="flex flex-col sm:flex-row gap-4 mb-6">
               <div className="flex gap-3">
-                <div className="relative">
+                <div className="relative w-full">
                   <DatePicker
                     selected={ledgerFilterDates.startDate}
                     onChange={(date) => setLedgerFilterDates(prev => ({ ...prev, startDate: date }))}
@@ -1033,13 +1099,13 @@ const CustomerLedger = () => {
                     startDate={ledgerFilterDates.startDate}
                     endDate={ledgerFilterDates.endDate}
                     placeholderText="Start Date"
-                    className="w-full px-4 py-2 border border-gray-200 rounded-xl shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-700"
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-blue-600 focus:border-blue-600 text-gray-800"
                     dateFormat="dd/MM/yyyy"
                     isClearable
                   />
                   <CalendarIcon className="w-5 h-5 text-gray-500 absolute right-3 top-1/2 transform -translate-y-1/2" />
                 </div>
-                <div className="relative">
+                <div className="relative w-full">
                   <DatePicker
                     selected={ledgerFilterDates.endDate}
                     onChange={(date) => setLedgerFilterDates(prev => ({ ...prev, endDate: date }))}
@@ -1048,7 +1114,7 @@ const CustomerLedger = () => {
                     endDate={ledgerFilterDates.endDate}
                     minDate={ledgerFilterDates.startDate}
                     placeholderText="End Date"
-                    className="w-full px-4 py-2 border border-gray-200 mici: 2 focus:ring-blue-500 focus:border-blue-500 text-gray-700"
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-blue-600 focus:border-blue-600 text-gray-800"
                     dateFormat="dd/MM/yyyy"
                     isClearable
                   />
@@ -1057,56 +1123,64 @@ const CustomerLedger = () => {
               </div>
             </div>
             <div className="overflow-x-auto">
-              <table className="min-w-full border-collapse text-sm bg-white rounded-xl shadow-sm">
+              <table className="w-full border-collapse text-sm bg-white rounded-lg shadow-sm">
                 <thead>
-                  <tr className="bg-gray-200">
-                    <th className="py-3 px-6 font-semibold border border-black text-left">Invoice #</th>
-                    <th className="py-3 px-6 font-semibold border border-black text-left">Date</th>
-                    <th className="py-3 px-6 font-semibold border border-black text-left">Description</th>
-                    <th className="py-3 px-6 font-semibold border border-black text-right">Debit (PKR)</th>
-                    <th className="py-3 px-6 font-semibold border border-black text-right">Credit (PKR)</th>
-                    <th className="py-3 px-6 font-semibold border border-black text-right">Balance (PKR)</th>
+                  <tr className="bg-blue-600 text-white">
+                    <th className="py-3 px-4 text-sm border font-semibold">Sr No</th>
+                    <th className="py-3 px-4 text-sm border font-semibold">Date</th>
+                    <th className="py-3 px-4 text-sm border font-semibold">Description</th>
+                    <th className="py-3 px-4 text-sm border font-semibold">Debit</th>
+                    <th className="py-3 px-4 text-sm border font-semibold">Credit</th>
+                    <th className="py-3 px-4 text-sm border font-semibold">Balance</th>
                   </tr>
                 </thead>
                 <tbody>
                   {getLedgerForCustomer(selectedCustomer.customer).ledgerData.map((entry, index) => (
-                    <tr key={index} className={index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
-                      <td className="py-3 px-6 border border-black">{entry.invoice}</td>
-                      <td className="py-3 px-6 border border-black">{entry.date}</td>
-                      <td className="py-3 px-6 border border-black text-left">{entry.description}</td>
-                      <td className="py-3 px-6 border border-black text-right">{entry.debit > 0 ? `PKR ${entry.debit.toLocaleString()}` : '-'}</td>
-                      <td className="py-3 px-6 border border-black text-right">{entry.credit > 0 ? `PKR ${entry.credit.toLocaleString()}` : '-'}</td>
-                      <td className="py-3 px-6 border border-black text-right">
-                        {entry.balance >= 0 ? (
-                          <span className="text-red-600 font-semibold">PKR {entry.balanceDisplay.toLocaleString()} Cr</span>
-                        ) : (
-                          <span className="text-green-600 font-semibold">PKR {entry.balanceDisplay.toLocaleString()} Dr</span>
-                        )}
-                      </td>
-                    </tr>
+                    <React.Fragment key={index}>
+                      {entry.debit > 0 && (
+                        <tr key={`debit-${entry.id || index}`} className={`${index % 2 === 0 ? 'bg-white' : 'bg-gray-50'} border-b border-gray-200`}>
+                          <td className="border py-2 px-3 text-center">{entry.index}</td>
+                          <td className="border py-2 px-3 text-center">{entry.date}</td>
+                          <td className="border py-2 px-3 text-left">{entry.description}</td>
+                          <td className="border py-2 px-3 text-right">{entry.debit.toLocaleString()}</td>
+                          <td className="border py-2 px-3 text-right">0</td>
+                          <td className="border py-2 px-3 text-right">{entry.balanceDisplay.toLocaleString()}</td>
+                        </tr>
+                      )}
+                      {entry.credit > 0 && (
+                        <tr key={`credit-${entry.id || index}`} className={`${index % 2 === 0 ? 'bg-white' : 'bg-gray-50'} border-b border-gray-200`}>
+                          <td className="border py-2 px-3 text-center">{entry.index}</td>
+                          <td className="border py-2 px-3 text-center">{entry.date}</td>
+                          <td className="border py-2 px-3 text-left">{entry.description}</td>
+                          <td className="border py-2 px-3 text-right">0</td>
+                          <td className="border py-2 px-3 text-right">{entry.credit.toLocaleString()}</td>
+                          <td className="border py-2 px-3 text-right">{entry.balanceDisplay.toLocaleString()}</td>
+                        </tr>
+                      )}
+                    </React.Fragment>
                   ))}
-                  <tr className="font-bold">
-                    <td colSpan="3" className="py-3 px-6 border border-black text-right">Total:</td>
-                    <td className="py-3 px-6 border border-black text-right">{getLedgerForCustomer(selectedCustomer.customer).totalDebit.toLocaleString()}</td>
-                    <td className="py-3 px-6 border border-black text-right">{getLedgerForCustomer(selectedCustomer.customer).totalCredit.toLocaleString()}</td>
-                    <td className="py-3 px-6 border border-black text-right"></td>
+                  <tr className="border bg-white font-semibold border-t-2 border-gray-300">
+                    <td colSpan="3" className="border py-3 px-4 text-right">Total:</td>
+                    <td className="border py-3 px-4 text-right">{getLedgerForCustomer(selectedCustomer.customer).totalDebit.toLocaleString()}</td>
+                    <td className="border py-3 px-4 text-right">{getLedgerForCustomer(selectedCustomer.customer).totalCredit.toLocaleString()}</td>
+                    <td className="border py-3 px-4 text-right"></td>
                   </tr>
                 </tbody>
               </table>
             </div>
-            <div className="footer mt-6 text-center text-gray-600 text-sm">
+            <div className="footer mt-6 text-center text-gray-500 text-sm">
               <p>Generated by SARHAD TYRE TRADERS</p>
             </div>
             <div className="flex justify-end gap-4 mt-6">
               <button
                 onClick={handlePrint}
-                className="px-6 py-2 bg-gradient-to-r from-green-500 to-teal-500 text-white rounded-xl hover:from-green-600 hover:to-teal-600 transition duration-200"
+                className="px-6 py-2 bg-gradient-to-r from-green-500 to-teal-500 text-white rounded-lg hover:from-green-600 hover:to-teal-600 transition duration-300"
               >
                 Print
               </button>
               <button
                 onClick={closeLedgerModal}
-                className="px-6 py-2 bg-gradient-to-r from-red-500 to-pink-500 text-white rounded-xl hover:from-red-600 hover:to-pink-600 transition duration-200"
+                className="px-6 py-2 bg-gradient-to-r from-red-500 to-pink-600 text-white rounded-lg hover:from-red-600 hover:to-pink-600 transition duration-300"
               >
                 Close
               </button>

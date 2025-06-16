@@ -289,7 +289,7 @@ const Transfer = () => {
           onChange={handleCompanyChange}
           className="border border-gray-300 p-2 rounded w-full"
         >
-          <option value="">Select Company</option>
+          <option value="">Select Party</option>
           {availableCompanies.map((company, idx) => (
             <option key={idx} value={company}>{company}</option>
           ))}
@@ -411,7 +411,7 @@ const Transfer = () => {
         <table className="w-full border-collapse text-sm text-left">
           <thead className="bg-gray-100">
             <tr>
-              <th className="py-2 px-4 font-semibold">Company</th>
+              <th className="py-2 px-4 font-semibold">Party</th>
               <th className="py-2 px-4 font-semibold">Brand</th>
               <th className="py-2 px-4 font-semibold">Model</th>
               <th className="py-2 px-4 font-semibold">Size</th>
@@ -477,7 +477,7 @@ const Transfer = () => {
             <section className="grid grid-cols-1 sm:grid-cols-2 gap-8 text-gray-700 text-sm leading-relaxed mb-8">
               <div>
                 <h3 className="font-semibold text-lg mb-3 text-gray-900 border-b border-gray-300 pb-1">Tyre Details</h3>
-                <p><span className="font-medium text-gray-800">Company:</span> {viewTransfer.company}</p>
+                <p><span className="font-medium text-gray-800">Party:</span> {viewTransfer.company}</p>
                 <p><span className="font-medium text-gray-800">Brand:</span> {viewTransfer.brand}</p>
                 <p><span className="font-medium text-gray-800">Model:</span> {viewTransfer.model}</p>
                 <p><span className="font-medium text-gray-800">Size:</span> {viewTransfer.size}</p>

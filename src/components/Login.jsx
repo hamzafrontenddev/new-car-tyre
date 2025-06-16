@@ -38,8 +38,8 @@ const Login = () => {
     if (!validateForm()) return;
 
     // Dummy authentication logic
-    const validEmail = "hamza@gmail.com";
-    const validPassword = "hamza7811";
+    const validEmail = "srhad@gmail.com";
+    const validPassword = "srhad7654";
 
     try {
       if (email === validEmail && password === validPassword) {

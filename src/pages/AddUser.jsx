@@ -59,7 +59,6 @@ const AddUser = () => {
           if (userType === "Company") {
             await addDoc(collection(db, "companyDetails"), ledgerData);
             toast.success("Company added to company ledger!");
- SETUP
           } else if (userType === "Customer") {
             await addDoc(collection(db, "customerDetails"), ledgerData);
             toast.success("Customer added to customer ledger!");
@@ -162,7 +161,7 @@ const AddUser = () => {
         >
           <option value="">Select Type</option>
           <option value="Customer">Customer</option>
-          <option value="Company">Company</option>
+          <option value="Company">Party</option>
         </select>
         <button
           type="submit"
@@ -183,7 +182,7 @@ const AddUser = () => {
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {/* Companies List */}
         <div>
-          <h3 className="text-lg font-semibold mb-2">Companies</h3>
+          <h3 className="text-lg font-semibold mb-2">Party</h3>
           <div className="overflow-x-auto">
             <table className="min-w-full border-collapse text-sm text-left">
               <thead>
@@ -265,7 +264,7 @@ const AddUser = () => {
                       <td className="py-2 px-4">
                         <button
                           onClick={() => handleEdit(user)}
-                          className="px-3 py-1 text-sm bg-blue-100 text-blue-800 border AscendingDescending border border-blue-300 rounded hover:bg-blue-200 mr-2"
+                          className="px-3 py-1 text-sm bg-blue-100 text-blue-800 AscendingDescending border border-blue-300 rounded hover:bg-blue-200 mr-2"
                         >
                           Edit
                         </button>

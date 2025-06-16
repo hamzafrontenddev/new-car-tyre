@@ -7,7 +7,6 @@ import AddUser from "./pages/AddUser";
 import BuyTyre from "./pages/BuyTyre";
 import Inventory from "./pages/Inventory";
 import Sell from "./pages/Sell";
-import Additem from "./pages/Additem";
 import Return from "./pages/Return";
 import CompanyLeaders from "./pages/CompanyLeaders";
 import ProfitLoss from "./pages/ProfitLoss";
@@ -156,16 +155,6 @@ const Sidebar = ({ isOpen, toggleSidebar }) => {
             Add Inventory
           </NavLink>
           <NavLink
-            to="/item"
-            className={({ isActive }) =>
-              `font-semibold transition duration-200 px-4 py-2 rounded ${isActive ? "bg-blue-600 text-white" : "text-gray-600 hover:bg-blue-100 hover:text-blue-500"
-              }`
-            }
-            onClick={toggleSidebar}
-          >
-            Add Item
-          </NavLink>
-          <NavLink
             to="/companies"
             className={({ isActive }) =>
               `font-semibold transition duration-200 px-4 py-2 rounded ${isActive ? "bg-blue-600 text-white" : "text-gray-600 hover:bg-blue-100 hover:text-blue-500"
@@ -267,14 +256,6 @@ function App() {
               }
             />
             <Route
-              path="/item"
-              element={
-                <PrivateRoute>
-                  <Additem />
-                </PrivateRoute>
-              }
-            />
-            <Route
               path="/sell"
               element={
                 <PrivateRoute>
@@ -304,7 +285,8 @@ function App() {
                 <PrivateRoute>
                   <CompanyPendingDues />
                 </PrivateRoute>
-              } />
+              }
+            />
             <Route
               path="/customer-ledger"
               element={
