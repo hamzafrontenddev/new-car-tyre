@@ -397,71 +397,71 @@ const CustomerLedger = () => {
   };
 
   const getLedgerForCustomer = (customerName) => {
-    console.log('Fetching ledger for customer:', customerName);
-    const customer = customerSummary.find(item => item.customer.toLowerCase() === customerName.toLowerCase());
-    if (!customer) {
-      console.warn('Customer not found in customerSummary:', customerName);
-      return { ledgerData: [], totalDebit: 0, totalCredit: 0 };
-    }
+  console.log('Fetching ledger for customer:', customerName);
+  const customer = customerSummary.find(item => item.customer.toLowerCase() === customerName.toLowerCase());
+  if (!customer) {
+    console.warn('Customer not found in customerSummary:', customerName);
+    return { ledgerData: [], totalDebit: 0, totalCredit: 0 };
+  }
 
-    let balance = 0;
-    const sortedEntries = ledgerEntries
-      .filter(entry => {
-        const entryCustomer = (entry.customerName || '').trim().toLowerCase();
-        return entryCustomer === customerName.toLowerCase();
-      })
-      .filter(entry => {
-        const entryDate = parseDateSafely(entry.date);
-        const { startDate, endDate } = ledgerFilterDates;
-        return startDate && endDate ? (entryDate >= startDate && entryDate <= endDate) : true;
-      })
-      .sort((a, b) => parseDateSafely(a.createdAt) - parseDateSafely(b.createdAt))
-      .map((entry, index) => {
-        if (!entry) {
-          console.warn('Invalid entry skipped:', entry);
-          return null;
+  let balance = 0;
+  const sortedEntries = ledgerEntries
+    .filter(entry => {
+      const entryCustomer = (entry.customerName || '').trim().toLowerCase();
+      return entryCustomer === customerName.toLowerCase();
+    })
+    .filter(entry => {
+      const entryDate = parseDateSafely(entry.date);
+      const { startDate, endDate } = ledgerFilterDates;
+      return startDate && endDate ? (entryDate >= startDate && entryDate <= endDate) : true;
+    })
+    .sort((a, b) => parseDateSafely(a.createdAt) - parseDateSafely(b.createdAt))
+    .map((entry, index) => {
+      if (!entry) {
+        console.warn('Invalid entry skipped:', entry);
+        return null;
+      }
+      const debit = parseNumber(entry.debit);
+      const credit = parseNumber(entry.credit);
+      balance += debit - credit;
+
+      let description = 'Unknown';
+      if (debit > 0) {
+        if (entry.narration?.startsWith('Sale_')) {
+          const transactionId = entry.narration.replace('Sale_', '');
+          const sales = sellData.filter(sale => sale.transactionId === transactionId);
+          description = sales.length > 0 ? sales.map(sale => {
+            const size = sale.size || 'N/A';
+            const brand = sale.brand || 'Unknown';
+            const quantity = parseNumber(sale.quantity, 1);
+            const price = parseNumber(sale.price);
+            return `${size}_${brand}_Qty_${quantity}_Rate_${price}`;
+          }).join(', ') : 'Sale (Details Not Found)';
+        } else {
+          description = entry.description || entry.narration || 'Manual Debit';
         }
-        const debit = parseNumber(entry.debit);
-        const credit = parseNumber(entry.credit);
-        balance += debit - credit;
+      } else if (credit > 0) {
+        description = entry.paymentMethod === 'Bank' ? `Payment via ${entry.bankName || 'N/A'}` : 'Cash Payment';
+      }
 
-        let description = 'Unknown';
-        if (debit > 0) {
-          if (entry.narration?.startsWith('Sale_')) {
-            const transactionId = entry.narration.replace('Sale_', '');
-            const sales = sellData.filter(sale => sale.transactionId === transactionId);
-            description = sales.length > 0 ? sales.map(sale => {
-              const size = sale.size || 'N/A';
-              const brand = sale.brand || 'Unknown';
-              const quantity = parseNumber(sale.quantity, 1);
-              const price = parseNumber(sale.price);
-              return `${size}_${brand}_Qty_${quantity}_Rate_${price}`;
-            }).join(', ') : 'Sale (Details Not Found)';
-          } else {
-            description = entry.description || entry.narration || 'Manual Debit';
-          }
-        } else if (credit > 0) {
-          description = entry.paymentMethod === 'Bank' ? `Payment via ${entry.bankName || 'N/A'}` : 'Cash Payment';
-        }
+      return {
+        index: index + 1,
+        date: parseDateSafely(entry.date).toISOString().split('T')[0] || 'N/A',
+        description: description || 'N/A',
+        debit: debit || 0,
+        credit: credit || 0,
+        balance: balance,
+        balanceDisplay: balance.toLocaleString(), // Changed from Math.abs to direct balance
+      };
+    })
+    .filter(entry => entry !== null);
 
-        return {
-          index: index + 1,
-          date: parseDateSafely(entry.date).toISOString().split('T')[0] || 'N/A',
-          description: description || 'N/A',
-          debit: debit || 0,
-          credit: credit || 0,
-          balance: balance || 0,
-          balanceDisplay: Math.abs(balance) || 0,
-        };
-      })
-      .filter(entry => entry !== null);
+  const totalDebit = sortedEntries.reduce((sum, entry) => sum + (entry.debit || 0), 0);
+  const totalCredit = sortedEntries.reduce((sum, entry) => sum + (entry.credit || 0), 0);
+  console.log('Ledger data for', customerName, ':', sortedEntries);
 
-    const totalDebit = sortedEntries.reduce((sum, entry) => sum + (entry.debit || 0), 0);
-    const totalCredit = sortedEntries.reduce((sum, entry) => sum + (entry.credit || 0), 0);
-    console.log('Ledger data for', customerName, ':', sortedEntries);
-
-    return { ledgerData: sortedEntries, totalDebit, totalCredit };
-  };
+  return { ledgerData: sortedEntries, totalDebit, totalCredit };
+};
 
   const getBrandsForCustomer = (customerName) => {
     const customer = customerSummary.find(item => item.customer.toLowerCase() === customerName.toLowerCase());
@@ -612,127 +612,131 @@ const CustomerLedger = () => {
   };
 
   const handlePrint = () => {
-    if (!selectedCustomer) {
-      toast.error('No customer selected for printing');
-      return;
-    }
+  if (!selectedCustomer) {
+    toast.error('No customer selected for printing');
+    return;
+  }
 
-    const { ledgerData, totalDebit, totalCredit } = getLedgerForCustomer(selectedCustomer.customer);
-    if (!ledgerData.length) {
-      toast.error('No ledger data available for printing');
-      return;
-    }
+  const { ledgerData, totalDebit, totalCredit } = getLedgerForCustomer(selectedCustomer.customer);
+  if (!ledgerData.length) {
+    toast.error('No ledger data available for printing');
+    return;
+  }
 
-    // Ensure all data is safe for rendering and serialization
-    const safeLedgerData = ledgerData.map(entry => ({
-      index: entry.index || 1,
-      date: entry.date || 'N/A',
-      description: entry.description || 'N/A',
-      debit: entry.debit || 0,
-      credit: entry.credit || 0,
-      balanceDisplay: entry.balanceDisplay || 0,
-    }));
+  // Ensure all data is safe for rendering and serialization
+  const safeLedgerData = ledgerData.map(entry => ({
+    index: entry.index || 1,
+    date: entry.date || 'N/A',
+    description: entry.description || 'N/A',
+    debit: entry.debit || 0,
+    credit: entry.credit || 0,
+    balance: entry.balance || 0, // Use raw balance
+    balanceDisplay: entry.balanceDisplay, // Already formatted with toLocaleString
+  }));
 
-    const printContent = `
-      <html>
-        <head>
-          <title>${selectedCustomer.customer} Ledger</title>
-          <style>
-            body { font-family: Arial, sans-serif; margin: 20px; }
-            .container { max-width: 1200px; margin: 0 auto; padding: 20px; border: 2px solid #000; border-radius: 10px; }
-            .header { margin-bottom: 20px; text-align: center; }
-            .header .title { font-size: 24px; font-weight: bold; }
-            .header .party { font-size: 16px; margin: 5px 0; }
-            .header .account { font-size: 14px; margin: 5px 0; }
-            .header .date-range { font-size: 14px; margin: 5px 0; }
-            .header .date { font-size: 14px; margin: 5px 0; text-align: right; }
-            .header .page { font-size: 12px; color: #666; text-align: right; font-weight: bold; }
-            table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-            th, td { border: 1px solid #000; padding: 10px 8px; text-align: right; }
-            th { background-color: #000; color: white; text-align: center; }
-            td.text-left { text-align: left; }
-            .total-row td { font-weight: bold; }
-            .footer { margin-top: 20px; text-align: center; color: #666; font-size: 12px; }
-          </style>
-        </head>
-        <body>
-          <div class="container">
-            <div class="header">
-              <div class="title">SARHAD TYRE TRADERS</div>
-              <div class="party">Customer Name: ${selectedCustomer.customer || 'Unknown'}</div>
-              <div class="account">ACCOUNT LEDGER</div>
-              <div class="date-range">Date ${new Date(ledgerFilterDates.startDate || '2024-01-01').toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' }).toUpperCase()} - ${new Date(ledgerFilterDates.endDate || new Date()).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' }).toUpperCase()}</div>
-              <div class="date">Date: ${new Date().toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true }).toUpperCase()}</div>
-              <div class="page">Page 1</div>
-            </div>
-            <table>
-              <thead>
-                <tr>
-                  <th>Sr No</th>
-                  <th>Date</th>
-                  <th>Description</th>
-                  <th>Debit</th>
-                  <th>Credit</th>
-                  <th>Balance</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${safeLedgerData.map(entry => `
-                  ${entry.debit > 0 ? `
-                    <tr>
-                      <td>${entry.index}</td>
-                      <td>${entry.date}</td>
-                      <td class="text-left">${entry.description}</td>
-                      <td>${entry.debit.toLocaleString()}</td>
-                      <td>0</td>
-                      <td>${entry.balanceDisplay.toLocaleString()}</td>
-                    </tr>
-                  ` : ''}
-                  ${entry.credit > 0 ? `
-                    <tr>
-                      <td>${entry.index}</td>
-                      <td>${entry.date}</td>
-                      <td class="text-left">${entry.description}</td>
-                      <td>0</td>
-                      <td>${entry.credit.toLocaleString()}</td>
-                      <td>${entry.balanceDisplay.toLocaleString()}</td>
-                    </tr>
-                  ` : ''}
-                `).join('')}
-                <tr class="total-row">
-                  <td colspan="3">Total:</td>
-                  <td>${totalDebit.toLocaleString()}</td>
-                  <td>${totalCredit.toLocaleString()}</td>
-                  <td></td>
-                </tr>
-              </tbody>
-            </table>
-            <div class="footer">
-              <p>Generated by SARHAD TYRE TRADERS</p>
-            </div>
+  const printContent = `
+    <html>
+      <head>
+        <title>${selectedCustomer.customer} Ledger</title>
+        <style>
+          body { font-family: Arial, sans-serif; margin: 20px; }
+          .container { max-width: 1200px; margin: 0 auto; padding: 20px; border: 2px solid #000; border-radius: 10px; }
+          .header { margin-bottom: 20px; text-align: center; }
+          .header .title { font-size: 24px; font-weight: bold; }
+          .header .party { font-size: 16px; margin: 5px 0; }
+          .header .account { font-size: 14px; margin: 5px 0; }
+          .header .date-range { font-size: 14px; margin: 5px 0; }
+          .header .date { font-size: 14px; margin: 5px 0; text-align: right; }
+          .header .page { font-size: 12px; color: #666; text-align: right; font-weight: bold; }
+          table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+          th, td { border: 1px solid #000; padding: 10px 8px; text-align: right; }
+          th { background-color: #000; color: white; text-align: center; }
+          td.text-left { text-align: left; }
+          .total-row td { font-weight: bold; }
+          @media print {
+            body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+            * { transition: none !important; animation: none !important; }
+          }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <div class="header">
+            <div class="title">SARHAD TYRE TRADERS</div>
+            <div class="party">Customer Name: ${selectedCustomer.customer || 'Unknown'}</div>
+            <div class="account">ACCOUNT LEDGER</div>
+            <div class="date-range">Date ${new Date(ledgerFilterDates.startDate || '2024-01-01').toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' }).toUpperCase()} - ${new Date(ledgerFilterDates.endDate || new Date()).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' }).toUpperCase()}</div>
+            <div class="date">Date: ${new Date().toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true }).toUpperCase()}</div>
+            <div class="page">Page 1</div>
           </div>
-          <script>
-            window.onload = () => {
-              try {
-                window.print();
-                window.onafterprint = () => window.close();
-              } catch (e) {
-                console.error('Print error:', e);
-              }
-            };
-          </script>
-        </body>
-      </html>
-    `;
+          <table>
+            <thead>
+              <tr>
+                <th>Sr No</th>
+                <th>Date</th>
+                <th>Description</th>
+                <th>Debit</th>
+                <th>Credit</th>
+                <th>Balance</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${safeLedgerData.map(entry => `
+                ${entry.debit > 0 ? `
+                  <tr>
+                    <td>${entry.index}</td>
+                    <td>${entry.date}</td>
+                    <td class="text-left">${entry.description}</td>
+                    <td>${entry.debit.toLocaleString()}</td>
+                    <td>0</td>
+                    <td class="${entry.balance < 0 ? 'balance-negative' : 'balance-positive'}">${entry.balanceDisplay}</td>
+                  </tr>
+                ` : ''}
+                ${entry.credit > 0 ? `
+                  <tr>
+                    <td>${entry.index}</td>
+                    <td>${entry.date}</td>
+                    <td class="text-left">${entry.description}</td>
+                    <td>0</td>
+                    <td>${entry.credit.toLocaleString()}</td>
+                    <td class="${entry.balance < 0 ? 'balance-negative' : 'balance-positive'}">${entry.balanceDisplay}</td>
+                  </tr>
+                ` : ''}
+              `).join('')}
+              <tr class="total-row">
+                <td colspan="3">Total:</td>
+                <td>${totalDebit.toLocaleString()}</td>
+                <td>${totalCredit.toLocaleString()}</td>
+                <td></td>
+              </tr>
+            </tbody>
+          </table>
+          <div class="footer">
+            <p>Generated by SARHAD TYRE TRADERS</p>
+          </div>
+        </div>
+        <script>
+          window.onload = () => {
+            try {
+              window.print();
+              window.onafterprint = () => window.close();
+            } catch (e) {
+              console.error('Print error:', e);
+            }
+          };
+        </script>
+      </body>
+    </html>
+  `;
 
-    const printWindow = window.open('', '_blank');
-    if (printWindow) {
-      printWindow.document.write(printContent);
-      printWindow.document.close();
-    } else {
-      toast.error('Failed to open print window. Please check popup blockers.');
-    }
-  };
+  const printWindow = window.open('', '_blank');
+  if (printWindow) {
+    printWindow.document.write(printContent);
+    printWindow.document.close();
+  } else {
+    toast.error('Failed to open print window. Please check popup blockers.');
+  }
+};
 
   return (
     <div className="p-6 max-w-7xl mx-auto bg-gradient-to-b from-gray-50 to-gray-100 min-h-screen">

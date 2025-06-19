@@ -214,61 +214,57 @@ const CompanyLeaders = () => {
   };
 
   const getLedgerForCompany = (companyName) => {
-    const company = companySummary.find(item => item.company === companyName);
-    if (!company) return { ledgerData: [], totalDebit: 0, totalCredit: 0 };
+  const company = companySummary.find(item => item.company === companyName);
+  if (!company) return { ledgerData: [], totalDebit: 0, totalCredit: 0 };
 
-    const sortedEntries = ledgerEntries
-      .filter(entry => entry.companyName.toLowerCase() === companyName.toLowerCase())
-      .filter(entry => {
-        const entryDate = new Date(entry.date);
-        const { startDate, endDate } = ledgerFilterDates;
-        if (startDate && endDate) {
-          return entryDate >= startDate && entryDate <= endDate;
-        }
-        return true;
-      })
-      .sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
-
-    let balance = 0;
-    const ledgerData = sortedEntries.map((entry, index) => {
-      const debit = parseFloat(entry.debit) || 0;
-      const credit = parseFloat(entry.credit) || 0;
-      balance += debit - credit;
-
-      let description = entry.narration || 'N/A';
-      // Handle older formats: "Purchase of" and without brand
-      if (description.startsWith('Purchase of') && entry.invoiceNumber) {
-        const purchase = buyData.find(p => p.id === entry.invoiceNumber.split('-')[0].replace('INV', ''));
-        if (purchase) {
-          description = `${purchase.brand || 'N/A'}_${purchase.size || 'N/A'}_Qty_${purchase.quantity}_Rate_${purchase.price}`;
-        }
-      } else if (!description.includes('Payment via') && !description.includes('_Qty_')) {
-        // Handle entries with the previous format: size_Qty_quantity_Rate_price
-        const purchase = buyData.find(p => p.size === description.split('_Qty_')[0] && p.quantity == description.split('_Qty_')[1].split('_Rate_')[0] && p.price == description.split('_Rate_')[1]);
-        if (purchase) {
-          description = `${purchase.brand || 'N/A'}_${purchase.size || 'N/A'}_Qty_${purchase.quantity}_Rate_${purchase.price}`;
-        }
+  const sortedEntries = ledgerEntries
+    .filter(entry => entry.companyName.toLowerCase() === companyName.toLowerCase())
+    .filter(entry => {
+      const entryDate = new Date(entry.date);
+      const { startDate, endDate } = ledgerFilterDates;
+      if (startDate && endDate) {
+        return entryDate >= startDate && entryDate <= endDate;
       }
-      // Payment entries (credit > 0) already have narration as "Payment via ${bankName}"
+      return true;
+    })
+    .sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
 
-      return {
-        index: index + 1,
-        date: new Date(entry.date).toISOString().split('T')[0],
-        description,
-        invoice: entry.invoiceNumber || '-',
-        debit,
-        credit,
-        balance: balance,
-        balanceType: balance >= 0 ? 'Cr' : 'Dr',
-        balanceDisplay: Math.abs(balance),
-      };
-    });
+  let balance = 0;
+  const ledgerData = sortedEntries.map((entry, index) => {
+    const debit = parseFloat(entry.debit) || 0;
+    const credit = parseFloat(entry.credit) || 0;
+    balance += debit - credit;
 
-    const totalDebit = ledgerData.reduce((sum, entry) => sum + (parseFloat(entry.debit) || 0), 0);
-    const totalCredit = ledgerData.reduce((sum, entry) => sum + (parseFloat(entry.credit) || 0), 0);
+    let description = entry.narration || 'N/A';
+    if (description.startsWith('Purchase of') && entry.invoiceNumber) {
+      const purchase = buyData.find(p => p.id === entry.invoiceNumber.split('-')[0].replace('INV', ''));
+      if (purchase) {
+        description = `${purchase.brand || 'N/A'}_${purchase.size || 'N/A'}_Qty_${purchase.quantity}_Rate_${purchase.price}`;
+      }
+    } else if (!description.includes('Payment via') && !description.includes('_Qty_')) {
+      const purchase = buyData.find(p => p.size === description.split('_Qty_')[0] && p.quantity == description.split('_Qty_')[1].split('_Rate_')[0] && p.price == description.split('_Rate_')[1]);
+      if (purchase) {
+        description = `${purchase.brand || 'N/A'}_${purchase.size || 'N/A'}_Qty_${purchase.quantity}_Rate_${purchase.price}`;
+      }
+    }
 
-    return { ledgerData, totalDebit, totalCredit };
-  };
+    return {
+      index: index + 1,
+      date: new Date(entry.date).toISOString().split('T')[0],
+      description,
+      invoice: entry.invoiceNumber || '-',
+      debit,
+      credit,
+      balance: balance,
+      balanceDisplay: balance >= 0 ? balance.toLocaleString() : `-${Math.abs(balance).toLocaleString()}`,
+    };
+  });
+
+  const totalDebit = ledgerData.reduce((sum, entry) => sum + (parseFloat(entry.debit) || 0), 0);
+  const totalCredit = ledgerData.reduce((sum, entry) => sum + (parseFloat(entry.credit) || 0), 0);
+
+  return { ledgerData, totalDebit, totalCredit };
+};
 
   const getBrandsForCompany = (companyName) => {
     const company = companySummary.find(item => item.company === companyName);
@@ -494,8 +490,6 @@ const CompanyLeaders = () => {
             th, td { border: 1px solid #000; padding: 10px 8px; text-align: right; }
             th { background-color: #000; color: white; text-align: center; }
             td.text-left { text-align: left; }
-            .balance-cr { color: red; font-weight: bold; }
-            .balance-dr { color: green; font-weight: bold; }
             .total-row td { font-weight: bold; }
             .footer { margin-top: 20px; text-align: center; color: #666; font-size: 12px; }
           </style>

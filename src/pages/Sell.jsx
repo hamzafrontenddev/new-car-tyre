@@ -1141,7 +1141,6 @@ const SellTyre = () => {
                         )}
                         <th className="border border-gray-200 px-4 py-2 text-left font-semibold text-gray-700">Total Paid</th>
                         <th className="border border-gray-200 px-4 py-2 text-left font-semibold text-gray-700">Due</th>
-                        <th className="border border-gray-200 px-4 py-2 text-left font-semibold text-gray-700">Transaction</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1159,7 +1158,6 @@ const SellTyre = () => {
                             )}
                             <td className="border border-gray-200 px-4 py-2 text-gray-600">{(item.payableAmount || ((parseFloat(item.price) || 0) - (parseFloat(item.discount) || 0)) * (parseInt(item.quantity) || 0) - (parseFloat(item.due) || 0)).toLocaleString()}</td>
                             <td className="border border-gray-200 px-4 py-2 text-gray-600">{item.due || 0}</td>
-                            <td className="border border-gray-200 px-4 py-2 text-gray-600">{viewTransaction.bank ? viewTransaction.bank : "No Payment"}</td>
                           </tr>
                         );
                       })}
