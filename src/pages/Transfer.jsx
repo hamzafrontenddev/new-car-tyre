@@ -5,6 +5,7 @@ import { toast } from "react-toastify";
 import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
 import { CalendarIcon } from "@heroicons/react/24/outline";
+import Select from "react-select";
 
 const filterByDateRange = (data, start, end) => {
   if (!start || !end) return data;
@@ -283,50 +284,42 @@ const Transfer = () => {
       <h2 className="text-xl font-semibold mb-4">🔄 Transfer Store to Shop</h2>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-        <select
+        <Select
           name="company"
-          value={form.company}
-          onChange={handleCompanyChange}
-          className="border border-gray-300 p-2 rounded w-full"
-        >
-          <option value="">Select Party</option>
-          {availableCompanies.map((company, idx) => (
-            <option key={idx} value={company}>{company}</option>
-          ))}
-        </select>
-        <select
+          options={availableCompanies.map(c => ({ label: c, value: c }))}
+          value={form.company ? { label: form.company, value: form.company } : null}
+          onChange={option => handleCompanyChange({ target: { value: option ? option.value : "" } })}
+          placeholder="Select Party"
+          isClearable
+          classNamePrefix="react-select"
+        />
+        <Select
           name="brand"
-          value={form.brand}
-          onChange={handleBrandChange}
-          className="border border-gray-300 p-2 rounded w-full"
-        >
-          <option value="">Select Brand</option>
-          {availableBrands.map((brand, idx) => (
-            <option key={idx} value={brand}>{brand}</option>
-          ))}
-        </select>
-        <select
+          options={availableBrands.map(b => ({ label: b, value: b }))}
+          value={form.brand ? { label: form.brand, value: form.brand } : null}
+          onChange={option => handleBrandChange({ target: { value: option ? option.value : "" } })}
+          placeholder="Select Brand"
+          isClearable
+          classNamePrefix="react-select"
+        />
+        <Select
           name="model"
-          value={form.model}
-          onChange={handleModelChange}
-          className="border border-gray-300 p-2 rounded w-full"
-        >
-          <option value="">Select Model</option>
-          {availableModels.map((model, idx) => (
-            <option key={idx} value={model}>{model}</option>
-          ))}
-        </select>
-        <select
+          options={availableModels.map(m => ({ label: m, value: m }))}
+          value={form.model ? { label: form.model, value: form.model } : null}
+          onChange={option => handleModelChange({ target: { value: option ? option.value : "" } })}
+          placeholder="Select Model"
+          isClearable
+          classNamePrefix="react-select"
+        />
+        <Select
           name="size"
-          value={form.size}
-          onChange={handleSizeChange}
-          className="border border-gray-300 p-2 rounded w-full"
-        >
-          <option value="">Select Size</option>
-          {availableSizes.map((size, idx) => (
-            <option key={idx} value={size}>{size}</option>
-          ))}
-        </select>
+          options={availableSizes.map(s => ({ label: s, value: s }))}
+          value={form.size ? { label: form.size, value: form.size } : null}
+          onChange={option => handleSizeChange({ target: { value: option ? option.value : "" } })}
+          placeholder="Select Size"
+          isClearable
+          classNamePrefix="react-select"
+        />
         <input
           type="number"
           name="quantity"

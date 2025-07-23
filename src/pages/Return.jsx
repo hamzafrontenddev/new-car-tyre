@@ -6,6 +6,7 @@ import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
 import { CalendarIcon } from "@heroicons/react/24/outline";
 import { v4 as uuidv4 } from "uuid";
+import Select from "react-select";
 
 // Helper function to normalize dates for comparison
 const normalizeDate = (date) => {
@@ -564,55 +565,47 @@ const Return = () => {
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Party</label>
-                  <select
-                    value={item.company}
-                    onChange={(e) => handleCompanyChange(e, index)}
-                    className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-400 focus:outline-none"
-                  >
-                    <option value="">Select Party</option>
-                    {availableCompanies.map((c) => (
-                      <option key={c} value={c}>{c}</option>
-                    ))}
-                  </select>
+                  <Select
+                    options={availableCompanies.map(c => ({ label: c, value: c }))}
+                    value={item.company ? { label: item.company, value: item.company } : null}
+                    onChange={option => handleCompanyChange({ target: { value: option ? option.value : "" } }, index)}
+                    placeholder="Select Party"
+                    isClearable
+                    classNamePrefix="react-select"
+                  />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Brand</label>
-                  <select
-                    value={item.brand}
-                    onChange={(e) => handleBrandChange(e, index)}
-                    className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-400 focus:outline-none"
-                  >
-                    <option value="">Select Brand</option>
-                    {availableBrands.map((b) => (
-                      <option key={b} value={b}>{b}</option>
-                    ))}
-                  </select>
+                  <Select
+                    options={availableBrands.map(b => ({ label: b, value: b }))}
+                    value={item.brand ? { label: item.brand, value: item.brand } : null}
+                    onChange={option => handleBrandChange({ target: { value: option ? option.value : "" } }, index)}
+                    placeholder="Select Brand"
+                    isClearable
+                    classNamePrefix="react-select"
+                  />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Model</label>
-                  <select
-                    value={item.model}
-                    onChange={(e) => handleModelChange(e, index)}
-                    className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-400 focus:outline-none"
-                  >
-                    <option value="">Select Model</option>
-                    {availableModels.map((m) => (
-                      <option key={m} value={m}>{m}</option>
-                    ))}
-                  </select>
+                  <Select
+                    options={availableModels.map(m => ({ label: m, value: m }))}
+                    value={item.model ? { label: item.model, value: item.model } : null}
+                    onChange={option => handleModelChange({ target: { value: option ? option.value : "" } }, index)}
+                    placeholder="Select Model"
+                    isClearable
+                    classNamePrefix="react-select"
+                  />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Size</label>
-                  <select
-                    value={item.size}
-                    onChange={(e) => handleSizeChange(e, index)}
-                    className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-400 focus:outline-none"
-                  >
-                    <option value="">Select Size</option>
-                    {availableSizes.map((s) => (
-                      <option key={s} value={s}>{s}</option>
-                    ))}
-                  </select>
+                  <Select
+                    options={availableSizes.map(s => ({ label: s, value: s }))}
+                    value={item.size ? { label: item.size, value: item.size } : null}
+                    onChange={option => handleSizeChange({ target: { value: option ? option.value : "" } }, index)}
+                    placeholder="Select Size"
+                    isClearable
+                    classNamePrefix="react-select"
+                  />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Original Price</label>
@@ -635,7 +628,7 @@ const Return = () => {
                   <input
                     type="number"
                     value={item.returnQuantity}
-                    onChange={(e) => handleFieldChange(index, "returnQuantity", e.target.value)}
+                    onChange={e => handleFieldChange(index, "returnQuantity", e.target.value)}
                     className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-400 focus:outline-none"
                     min="0"
                   />
@@ -645,7 +638,7 @@ const Return = () => {
                   <input
                     type="number"
                     value={item.returnPrice}
-                    onChange={(e) => handleFieldChange(index, "returnPrice", e.target.value)}
+                    onChange={e => handleFieldChange(index, "returnPrice", e.target.value)}
                     className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-400 focus:outline-none"
                     min="0"
                   />
@@ -655,7 +648,7 @@ const Return = () => {
                   <input
                     type="date"
                     value={item.date}
-                    onChange={(e) => handleFieldChange(index, "date", e.target.value)}
+                    onChange={e => handleFieldChange(index, "date", e.target.value)}
                     className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-400 focus:outline-none"
                   />
                 </div>
@@ -664,7 +657,7 @@ const Return = () => {
                   <input
                     type="text"
                     value={item.comment}
-                    onChange={(e) => handleFieldChange(index, "comment", e.target.value)}
+                    onChange={e => handleFieldChange(index, "comment", e.target.value)}
                     className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-400 focus:outline-none"
                   />
                 </div>
