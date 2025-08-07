@@ -9,6 +9,7 @@ import {
   getDocs,
   query,
   where,
+  deleteDoc,
 } from "firebase/firestore";
 import { db } from "../firebase";
 import DatePicker from "react-datepicker";
@@ -68,7 +69,7 @@ const SellTyre = () => {
   const [isCustomerDropdownOpen, setIsCustomerDropdownOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const customerDropdownRef = useRef(null);
-  const itemsPerPage = 10;
+  const itemsPerPage = 100;
 
   // Check if any item has zero shop quantity to disable Sell button
   const isSellButtonDisabled = formItems.some(item => parseInt(item.shopQuantity) === 0 && item.company && item.brand && item.model && item.size);
@@ -597,8 +598,24 @@ const SellTyre = () => {
       const enteredQty = parseInt(item.quantity);
       const shopQty = parseInt(item.shopQuantity);
 
-      if (enteredQty > shopQty) {
-        toast.error(`❌ Only ${shopQty} tyres available in shop for item ${index + 1}. Cannot sell more than that.`);
+      // For editing, we need to account for the old quantities being restored
+      let availableQty = shopQty;
+      if (editTransactionId) {
+        // Find the old quantity for this item
+        const oldItem = editingTyres?.find(old => 
+          old.company === item.company && 
+          old.brand === item.brand && 
+          old.model === item.model && 
+          old.size === item.size
+        );
+        if (oldItem) {
+          const oldQty = parseInt(oldItem.quantity) || 0;
+          availableQty = shopQty + oldQty; // Add back the old quantity
+        }
+      }
+
+      if (enteredQty > availableQty) {
+        toast.error(`❌ Only ${availableQty} tyres available in shop for item ${index + 1}. Cannot sell more than that.`);
         return;
       }
     }
@@ -609,6 +626,80 @@ const SellTyre = () => {
     let descriptions = [];
 
     try {
+      // If editing, first restore old inventory quantities and remove old ledger entries
+      if (editTransactionId) {
+        // Get old transaction data to restore inventory
+        const oldSoldQuery = query(collection(db, "soldTyres"), where("transactionId", "==", editTransactionId));
+        const oldSoldSnapshot = await getDocs(oldSoldQuery);
+        const oldSoldItems = oldSoldSnapshot.docs.map(doc => doc.data());
+
+        // Restore old inventory quantities
+        for (const oldItem of oldSoldItems) {
+          const purchasedQuery = query(
+            collection(db, "purchasedTyres"),
+            where("company", "==", oldItem.company),
+            where("brand", "==", oldItem.brand),
+            where("model", "==", oldItem.model),
+            where("size", "==", oldItem.size)
+          );
+          const purchasedSnapshot = await getDocs(purchasedQuery);
+          const purchasedTyres = purchasedSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+
+          // Restore the old quantities
+          let restoreQty = parseInt(oldItem.quantity) || 0;
+          for (const tyre of purchasedTyres) {
+            if (restoreQty <= 0) break;
+            const currentShopQty = parseInt(tyre.shop) || 0;
+            const newShopQty = currentShopQty + restoreQty;
+            await updateDoc(doc(db, "purchasedTyres", tyre.id), {
+              shop: newShopQty,
+            });
+            restoreQty -= restoreQty; // Restore all at once
+          }
+        }
+
+        // Remove old ledger entries
+        const oldLedgerQuery = query(collection(db, "customerLedgerEntries"), where("invoiceNumber", "==", editTransactionId));
+        const oldLedgerSnapshot = await getDocs(oldLedgerQuery);
+        for (const ledgerDoc of oldLedgerSnapshot.docs) {
+          await deleteDoc(ledgerDoc.ref);
+        }
+
+        // Remove old sold tyres entries
+        for (const oldSoldDoc of oldSoldSnapshot.docs) {
+          await deleteDoc(oldSoldDoc.ref);
+        }
+
+        // Update customer details by removing old transaction impact
+        // Get the old customer name from the original transaction
+        const oldCustomerName = oldSoldItems[0]?.customerName?.toLowerCase().trim() || customerName;
+        
+        const oldCustomerQuery = query(collection(db, "customerDetails"), where("customerName", "==", oldCustomerName));
+        const oldCustomerSnapshot = await getDocs(oldCustomerQuery);
+        if (!oldCustomerSnapshot.empty) {
+          const oldCustomerDoc = oldCustomerSnapshot.docs[0];
+          const oldCustomerData = oldCustomerDoc.data();
+          
+          // Calculate old transaction totals
+          const oldTotalDebit = oldSoldItems.reduce((sum, item) => {
+            const price = (parseFloat(item.price) || 0) - (parseFloat(item.discount) || 0);
+            return sum + price * (parseInt(item.quantity) || 0);
+          }, 0);
+          const oldTotalDue = oldSoldItems.reduce((sum, item) => sum + (parseFloat(item.due) || 0), 0);
+          const oldTotalCredit = oldTotalDebit - oldTotalDue;
+
+          // Restore old customer details
+          const newTotalPaid = Math.max(0, parseFloat(oldCustomerData.totalPaid) || 0 - oldTotalCredit);
+          const newDue = Math.max(0, parseFloat(oldCustomerData.due) || 0 + oldTotalDebit - oldTotalCredit);
+
+          await updateDoc(oldCustomerDoc.ref, {
+            totalPaid: newTotalPaid,
+            due: newDue,
+          });
+        }
+      }
+
+      // Now process new transaction data
       for (const item of formItems) {
         const purchasedQuery = query(
           collection(db, "purchasedTyres"),
@@ -654,29 +745,12 @@ const SellTyre = () => {
           payableAmount: totalPayable,
         };
 
-        if (editTransactionId) {
-          const soldQuery = query(
-            collection(db, "soldTyres"),
-            where("transactionId", "==", editTransactionId),
-            where("company", "==", item.company),
-            where("brand", "==", item.brand),
-            where("model", "==", item.model),
-            where("size", "==", item.size)
-          );
-          const soldSnapshot = await getDocs(soldQuery);
-          if (!soldSnapshot.empty) {
-            await updateDoc(soldSnapshot.docs[0].ref, soldTyreData);
-          } else {
-            await addDoc(collection(db, "soldTyres"), soldTyreData);
-          }
-        } else {
-          await addDoc(collection(db, "soldTyres"), soldTyreData);
-        }
-
+        // Add new sold tyre entry
+        await addDoc(collection(db, "soldTyres"), soldTyreData);
         descriptions.push(`${item.quantity} ${item.brand} ${item.size}`);
       }
 
-      // Calculate totals
+      // Calculate new totals
       const totalDebit = formItems.reduce((sum, item) => {
         const price = (parseFloat(item.price) || 0) - (parseFloat(item.discount) || 0);
         return sum + price * (parseInt(item.quantity) || 0);
@@ -685,7 +759,7 @@ const SellTyre = () => {
       const totalDue = formItems.reduce((sum, item) => sum + (parseFloat(item.due) || 0), 0);
       const totalCredit = totalDebit - totalDue;
 
-      // Add Ledger Entry - SALE
+      // Add new Ledger Entry - SALE
       if (totalDebit > 0) {
         await addDoc(collection(db, "customerLedgerEntries"), {
           customerName,
@@ -701,7 +775,7 @@ const SellTyre = () => {
         });
       }
 
-      // Add Ledger Entry - PAYMENT
+      // Add new Ledger Entry - PAYMENT
       if (totalCredit > 0) {
         await addDoc(collection(db, "customerLedgerEntries"), {
           customerName,
@@ -717,7 +791,7 @@ const SellTyre = () => {
         });
       }
 
-      // Update or Add customerDetails
+      // Update customerDetails with new transaction
       const customerQuery = query(collection(db, "customerDetails"), where("customerName", "==", customerName));
       const customerSnapshot = await getDocs(customerQuery);
 
@@ -758,7 +832,7 @@ const SellTyre = () => {
         })),
         totalPayable: formItems.reduce((sum, item) => sum + (item.totalPrice || 0), 0),
       });
-      toast.success(editTransactionId ? "Transaction updated successfully!" : "Tyres sold successfully!");
+      toast.success(editTransactionId ? "Transaction updated successfully! All related data has been updated." : "Tyres sold successfully!");
     } catch (error) {
       console.error("Error processing sale:", error);
       toast.error("Error processing sale: " + error.message);
@@ -777,6 +851,19 @@ const SellTyre = () => {
 
   const handleCancelSell = () => {
     setShowConfirmPopup(false);
+  };
+
+  const handleEditTransaction = (transaction) => {
+    // Set the form to edit mode
+    setEditTransactionId(transaction.transactionId);
+    setEditingTyres(transaction.items);
+    setCustomerSearch(transaction.customerName);
+    setTransactionBank(transaction.bank || "");
+    
+    // Scroll to the form section
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    
+    toast.info("Transaction loaded for editing. Make your changes and click 'Update Transaction'.");
   };
 
   const filteredTyres = sellTyres.filter((tyre) =>
@@ -953,7 +1040,9 @@ const SellTyre = () => {
 
   return (
     <div className="p-6 max-w-7xl mx-auto">
-      <h2 className="text-xl font-semibold mb-4">🛒 Sell Tyres</h2>
+      <h2 className="text-xl font-semibold mb-4">
+        {editTransactionId ? "✏️ Edit Transaction" : "🛒 Sell Tyres"}
+      </h2>
       <div className="mb-6">
         <label className="block text-gray-700 font-medium mb-2">Customer Name</label>
         <input
@@ -1150,6 +1239,21 @@ const SellTyre = () => {
         >
           {editTransactionId ? "Update Transaction" : "Sell Items"}
         </button>
+        {editTransactionId && (
+          <button
+            onClick={() => {
+              setEditTransactionId(null);
+              setEditingTyres(null);
+              setFormItems([initialItemState]);
+              setCustomerSearch("");
+              setTransactionBank("");
+              toast.info("Edit mode cancelled. Form reset to new transaction.");
+            }}
+            className="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition"
+          >
+            Cancel Edit
+          </button>
+        )}
       </div>
 
       {showConfirmPopup && (
@@ -1320,7 +1424,7 @@ const SellTyre = () => {
                     <td className="py-2 px-4">{transaction.bank}</td>
                     <td className="py-2 px-4">Rs. {transaction.totalPayable.toLocaleString()}</td>
                     <td className="py-2 px-4">{transaction.date}</td>
-                    <td className="py-2 px-4">
+                    <td className="py-2 px-4 flex gap-2">
                       <button
                         onClick={() => setViewTransaction({
                           transactionId: transaction.transactionId,
@@ -1333,6 +1437,12 @@ const SellTyre = () => {
                         className="px-3 py-1 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition"
                       >
                         View
+                      </button>
+                      <button
+                        onClick={() => handleEditTransaction(transaction)}
+                        className="px-3 py-1 bg-yellow-500 text-white rounded-lg hover:bg-yellow-600 transition"
+                      >
+                        Edit
                       </button>
                     </td>
                     <td className="py-2 px-4">{transaction.comment}</td>

@@ -43,7 +43,7 @@ const BuyTyre = () => {
   const [editModalIsOpen, setEditModalIsOpen] = useState(false);
   const [editTyre, setEditTyre] = useState(null);
   const [users, setUsers] = useState([]); // Store users for mapping company names
-  const itemsPerPage = 5;
+  const itemsPerPage = 150;
 
   useEffect(() => {
     // Fetch tyres

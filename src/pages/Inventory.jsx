@@ -36,7 +36,7 @@ const Dashboard = () => {
   const [endDate, setEndDate] = useState(null);
   const [selectedDate, setSelectedDate] = useState(null);
   const [currentPage, setCurrentPage] = useState(1);
-  const itemsPerPage = 10;
+  const itemsPerPage = 150;
 
   useEffect(() => {
     const buyUnsub = onSnapshot(collection(db, "purchasedTyres"), (snapshot) => {

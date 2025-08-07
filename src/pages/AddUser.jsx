@@ -12,7 +12,7 @@ const AddUser = () => {
   const [editId, setEditId] = useState(null);
   const [search, setSearch] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
-  const itemsPerPage = 5;
+  const itemsPerPage = 100;
 
   // Fetch users from Firestore
   useEffect(() => {

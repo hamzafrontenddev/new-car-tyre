@@ -22,7 +22,7 @@ const CompanyLeaders = () => {
   const [addCompanyModalIsOpen, setAddCompanyModalIsOpen] = useState(false);
   const [ledgerModalIsOpen, setLedgerModalIsOpen] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
-  const [rowsPerPage] = useState(5);
+  const [rowsPerPage] = useState(150);
   const [companyFormData, setCompanyFormData] = useState({
     companyName: '',
     totalBrands: 0,

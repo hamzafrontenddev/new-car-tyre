@@ -25,7 +25,7 @@ const ProfitLoss = () => {
   const [endDate, setEndDate] = useState(null); // Changed to null for initial full data
   const [searchQuery, setSearchQuery] = useState(""); // State for search bar
   const [currentPage, setCurrentPage] = useState(1); // State for current page
-  const [rowsPerPage] = useState(5); // Number of rows per page
+  const [rowsPerPage] = useState(20); // Number of rows per page
 
   useEffect(() => {
     const unsubscribeBuy = onSnapshot(

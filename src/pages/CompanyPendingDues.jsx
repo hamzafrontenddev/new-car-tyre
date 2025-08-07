@@ -21,7 +21,7 @@ const CompanyPendingDues = () => {
   const [currentPage, setCurrentPage] = useState(1);
   const [startDate, setStartDate] = useState(null);
   const [endDate, setEndDate] = useState(null);
-  const itemsPerPage = 30;
+  const itemsPerPage = 150;
 
   useEffect(() => {
     let usersMap = {};

@@ -39,7 +39,7 @@ const CustomerLedger = () => {
   const [addCustomerModalIsOpen, setAddCustomerModalIsOpen] = useState(false);
   const [ledgerModalIsOpen, setLedgerModalIsOpen] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
-  const [rowsPerPage] = useState(5);
+  const [rowsPerPage] = useState(150);
   const [customerFormData, setCustomerFormData] = useState({
     customerName: '',
     totalBrands: 0,
